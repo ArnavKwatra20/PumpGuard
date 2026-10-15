@@ -1,0 +1,229 @@
+{
+  "benchmark_version": 1,
+  "operating_system": "Windows-11-10.0.26300-SP0",
+  "pytorch_runtime": {
+    "pytorch_version": "2.7.1+cpu",
+    "hip_version": null,
+    "provider": "cpu",
+    "device": "cpu",
+    "devices": []
+  },
+  "settings": {
+    "seed": 42,
+    "epochs": 3,
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "patience": 3,
+    "input": "data\\raw\\pump_telemetry.csv",
+    "data_kind": "synthetic"
+  },
+  "results": {
+    "cpu": {
+      "backend": "pytorch_cpu",
+      "compute_provider": "cpu",
+      "device": "cpu",
+      "model_version": "pumpguard-scenario-mlp-v1",
+      "training_config": {
+        "seed": 42,
+        "epochs_requested": 3,
+        "epochs_trained": 3,
+        "batch_size": 64,
+        "learning_rate": 0.001,
+        "patience": 3,
+        "hidden_sizes": [
+          64,
+          32
+        ],
+        "dropout": 0.1,
+        "device": "cpu",
+        "requested_compute_provider": "cpu",
+        "compute_provider": "cpu",
+        "device_name": "CPU",
+        "execution_path": "pytorch_cpu",
+        "best_epoch": 3,
+        "best_validation_balanced_accuracy": 0.58,
+        "best_validation_loss": 1.494469404220581,
+        "train_seconds": 0.015097299998160452
+      },
+      "validation_metrics": {
+        "sample_count": 50,
+        "labels": [
+          "normal",
+          "overheating",
+          "bearing_wear",
+          "cavitation",
+          "imbalance"
+        ],
+        "accuracy": 0.58,
+        "balanced_accuracy": 0.58,
+        "precision_macro": 0.4698136645962733,
+        "recall_macro": 0.58,
+        "f1_macro": 0.49232323232323233,
+        "confusion_matrix": [
+          [
+            0,
+            1,
+            4,
+            0,
+            5
+          ],
+          [
+            0,
+            10,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            2,
+            1,
+            0,
+            7
+          ],
+          [
+            0,
+            1,
+            0,
+            8,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            10
+          ]
+        ],
+        "per_class": {
+          "normal": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 10
+          },
+          "overheating": {
+            "precision": 0.7142857142857143,
+            "recall": 1.0,
+            "f1": 0.8333333333333333,
+            "support": 10
+          },
+          "bearing_wear": {
+            "precision": 0.2,
+            "recall": 0.1,
+            "f1": 0.13333333333333333,
+            "support": 10
+          },
+          "cavitation": {
+            "precision": 1.0,
+            "recall": 0.8,
+            "f1": 0.888888888888889,
+            "support": 10
+          },
+          "imbalance": {
+            "precision": 0.43478260869565216,
+            "recall": 1.0,
+            "f1": 0.6060606060606061,
+            "support": 10
+          }
+        },
+        "roc_auc": 0.8560000000000001,
+        "pr_auc": null,
+        "ranking_metric_note": "Multiclass one-vs-rest ROC-AUC computed; PR-AUC omitted."
+      },
+      "test_metrics": {
+        "sample_count": 50,
+        "labels": [
+          "normal",
+          "overheating",
+          "bearing_wear",
+          "cavitation",
+          "imbalance"
+        ],
+        "accuracy": 0.56,
+        "balanced_accuracy": 0.5599999999999999,
+        "precision_macro": 0.5561904761904761,
+        "recall_macro": 0.5599999999999999,
+        "f1_macro": 0.4924908424908424,
+        "confusion_matrix": [
+          [
+            2,
+            0,
+            1,
+            0,
+            7
+          ],
+          [
+            0,
+            10,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            3,
+            0,
+            0,
+            7
+          ],
+          [
+            1,
+            1,
+            1,
+            6,
+            1
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            10
+          ]
+        ],
+        "per_class": {
+          "normal": {
+            "precision": 0.6666666666666666,
+            "recall": 0.2,
+            "f1": 0.30769230769230765,
+            "support": 10
+          },
+          "overheating": {
+            "precision": 0.7142857142857143,
+            "recall": 1.0,
+            "f1": 0.8333333333333333,
+            "support": 10
+          },
+          "bearing_wear": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 10
+          },
+          "cavitation": {
+            "precision": 1.0,
+            "recall": 0.6,
+            "f1": 0.7499999999999999,
+            "support": 10
+          },
+          "imbalance": {
+            "precision": 0.4,
+            "recall": 1.0,
+            "f1": 0.5714285714285715,
+            "support": 10
+          }
+        },
+        "roc_auc": 0.8654999999999999,
+        "pr_auc": null,
+        "ranking_metric_note": "Multiclass one-vs-rest ROC-AUC computed; PR-AUC omitted."
+      },
+      "test_inference_seconds": 0.0005713999853469431
+    },
+    "amd_rocm": null
+  },
+  "gpu_status": "not_available",
+  "gpu_note": "No compatible AMD ROCm device was visible to PyTorch; no GPU result was fabricated.",
+  "interpretation": "Synthetic scenario classification benchmark only; not evidence of industrial maintenance performance."
+}

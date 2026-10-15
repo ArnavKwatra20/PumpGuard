@@ -1,0 +1,77 @@
+"""Explicit operator-triggered diagnostic inference endpoint."""
+import asyncio
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import ValidationError
+
+from pumpguard.models.diagnostic import DiagnosticRequest, DiagnosticResult, MLPredictionEvidence
+from pumpguard.services.diagnostics.providers import ProviderInvalidResponse, ProviderRateLimited, ProviderTimedOut, ProviderUnsupportedModel, ProviderUnavailable
+from pumpguard.services.diagnostics.service import DiagnosticTimeout
+
+router = APIRouter(tags=["diagnostics"])
+MAX_DIAGNOSTIC_REQUEST_BYTES = 32 * 1024
+
+
+@router.get("/diagnostics/status", summary="Diagnostic provider availability")
+def diagnostic_status(request: Request) -> dict[str, object]:
+    provider = request.app.state.diagnostic_service.provider
+    if provider.name == "mock":
+        return {"provider": "mock", "available": True, "is_mock": True}
+    return {"provider": provider.name, "available": False, "is_mock": False,
+            "configured": bool(getattr(provider, "configured", False)),
+            "model": getattr(provider, "model", None)}
+
+
+@router.get("/diagnostics/models", summary="Inspect AMD Token Factory model catalog")
+async def diagnostic_models(request: Request) -> dict[str, object]:
+    provider = request.app.state.diagnostic_service.provider
+    if provider.name == "mock":
+        return {"configured": False, "models": [], "capabilities_verified": False}
+    if not getattr(provider, "configured", False):
+        raise HTTPException(status_code=503, detail="AMD API key is not configured")
+    try:
+        models = await provider.list_models()
+        return {"configured": True, "models": models,
+                "capabilities_verified": any(model.get("capabilities_verified") for model in models)}
+    except ProviderRateLimited as exc:
+        raise HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "1"}) from exc
+    except ProviderTimedOut as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except ProviderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/diagnostics", response_model=DiagnosticResult,
+             summary="Request evidence-grounded diagnostic explanation",
+             openapi_extra={"requestBody": {"required": True, "content": {"application/json": {"schema": DiagnosticRequest.model_json_schema()}}}})
+async def diagnose(request: Request) -> DiagnosticResult:
+    """Bound and validate request bytes before dispatching to the configured provider."""
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_DIAGNOSTIC_REQUEST_BYTES:
+            raise HTTPException(status_code=413, detail="Diagnostic request exceeds the 32 KiB limit")
+        chunks.append(chunk)
+    body = b"".join(chunks)
+    try:
+        payload = DiagnosticRequest.model_validate_json(body)
+    except ValidationError as exc:
+        errors = [{"loc": error["loc"], "msg": error["msg"], "type": error["type"]} for error in exc.errors()]
+        raise HTTPException(status_code=422, detail=errors) from exc
+    try:
+        ml_prediction = await asyncio.to_thread(request.app.state.ml_inference.predict, payload.telemetry)
+        if ml_prediction:
+            payload = payload.model_copy(update={"ml_prediction": MLPredictionEvidence.model_validate(ml_prediction)})
+        return await request.app.state.diagnostic_service.diagnose(payload)
+    except DiagnosticTimeout as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except ProviderRateLimited as exc:
+        raise HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "1"}) from exc
+    except ProviderTimedOut as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except ProviderInvalidResponse as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ProviderUnsupportedModel as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProviderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
