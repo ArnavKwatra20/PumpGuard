@@ -15,6 +15,9 @@ apps/web/dist/
 apps/web/.npm-cache/
 apps/web/tsconfig.tsbuildinfo
 
+# Vercel CLI link state (created by `vercel link` / CLI deploys)
+.vercel/
+
 # Logs
 *.log
 
@@ -26,6 +29,7 @@ files.txt
 py_files.txt
 project_files.txt
 src_files.txt
+PUMPGUARD_AUDIT_REPORT.md
 
 # Model artifacts: keep only the required default inference model tracked.
 # Experiment/benchmark artifacts (e.g. phase3b_mlp.pt, phase4_ml_evaluation_mlp.pt) stay ignored.

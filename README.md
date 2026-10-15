@@ -195,7 +195,7 @@ The dashboard validates and plots all five supported API scenario identifiers fr
 
 An active warning or critical alert episode starts one repeating, alternating 740/520 Hz Web Audio pattern with short tone bursts and quiet gaps. The loop is idempotent across polling and React rerenders. **ACKNOWLEDGE ALARM — SILENCE SIREN** acknowledges only its episode; it silences the loop when no other active unacknowledged episode remains. Acknowledgement does not resolve the condition: the alert and component highlight remain until a fresh backend assessment no longer reports it. Severity changes update the same episode, so routine warning/critical fluctuations cannot create a fresh siren or restore its acknowledgement action. A later distinct episode can sound again. If autoplay is blocked, the UI reports that state and the one-time **Enable sound alerts** control unlocks playback, including a still-active alarm. Muting stops the sound while leaving visual alerts active. Acknowledgement and event history are held in frontend memory for the current page session only; they are not persisted across reloads or shared between operators. Audio behavior was verified through automated Web Audio mocks; actual audible speaker output was not confirmed in this run and depends on browser/device audio settings. All findings remain synthetic rule-engine alerts, not claims of physical damage.
 
-Verification: the current audited frontend suite has 88 passing tests, the backend suite has 141 passing tests with one existing Starlette/httpx deprecation warning, and `npm run build` succeeds (with the documented Three.js chunk-size advisory). The running browser verified live telemetry, an overheating assessment, alert history, pause/stop controls, and AMD catalog inspection; no test or browser check constitutes validation on real industrial equipment.
+Verification: the frontend suite has 90 passing tests across 12 files, the backend suite has 158 passing tests with one existing Starlette/httpx deprecation warning, and `npm run build` succeeds (with the documented Three.js chunk-size advisory). The running browser verified live telemetry, an overheating assessment, alert history, pause/stop controls, and AMD catalog inspection; no test or browser check constitutes validation on real industrial equipment.
 
 Launch as in Phase 4.1: run `uvicorn apps.api.main:app --host 127.0.0.1 --port 8001 --reload` from `D:\Hackathon\PumpGuard` with `.venv` activated, then run `npm run dev` from `D:\Hackathon\PumpGuard\apps\web` and open `http://127.0.0.1:5173`. Choose a scenario and click **Generate simulation**. Observe the sensor readings, discharge pressure, latest-sample time, charts, rule assessment, and alert history updating continuously.
 
@@ -215,7 +215,7 @@ Local development uses the Vite proxy target `127.0.0.1:8001`; Vite itself has n
 
 ## Hackathon deployment
 
-PumpGuard is a synthetic monitoring prototype for a temporary demonstration. It must not be connected to industrial control equipment or presented as a validated diagnostic system. The default deployment shape is a static frontend host plus one Python-compatible backend service. No hosting provider is hard-coded in this repository.
+PumpGuard is a synthetic monitoring prototype for a temporary demonstration. It must not be connected to industrial control equipment or presented as a validated diagnostic system. The default deployment shape is a static frontend host plus one Python-compatible backend service. No hosting provider is hard-coded in this repository. A concrete example wiring this shape to Vercel with two projects from this repository is documented at the end of this section.
 
 Build the frontend with the backend's public URL at build time:
 
@@ -251,3 +251,32 @@ Expected behavior is HTTP 200 for `/health` and simulation generation, successfu
 The active model/evidence design and GPU verification steps are documented in [`docs/amd-compute-and-predictive-maintenance.md`](docs/amd-compute-and-predictive-maintenance.md). The official [Radeon Cloud model catalog API](https://amd-aim.github.io/radeon-cloud-docs/api/models/) describes available metadata, and the [chat-completions API](https://amd-aim.github.io/radeon-cloud-docs/api/chat-completions/) documents the request and response contract. In the latest local audit, the catalog and a minimal OpenAI-compatible chat envelope were live-verified; a complete PumpGuard diagnostic result was not verified, so AMD explanations remain an optional, failure-isolated integration.
 
 The Diagnosis page also exposes optional maintenance-planner, telemetry-explanation, and scenario-analyst actions through `POST /api/v1/diagnostics/ai-feature`. These actions reuse server-owned deterministic telemetry context and the rule assessment, label all records as synthetic, and keep the rule engine authoritative. They are bounded draft explanations only; provider failure remains explicit and does not affect simulation or rule-based health.
+
+## Vercel deployment (two projects, one repository)
+
+This repository deploys to Vercel as two projects built from the same GitHub repository, matching the documented shape of a static frontend host plus one Python backend service. No provider-specific application code is required: the backend entry point is the root `app.py`, which Vercel's Python runtime auto-detects (FastAPI is detected from `requirements.txt`) and routes backend traffic to. Local development is unchanged (`uvicorn apps.api.main:app`).
+
+1. Push this repository to GitHub, for example:
+
+   ```text
+   git remote add origin https://github.com/<you>/PumpGuard.git
+   git push -u origin master
+   ```
+
+2. In the Vercel dashboard choose **Add New → Project** and import the same repository twice:
+   - **API project** — leave Root Directory at the repository root. Vercel detects FastAPI and deploys `app.py` as a single function; no build command or output directory is needed. Deploy it first and note its URL (for example `https://pumpguard.vercel.app`).
+   - **Web project** — set Root Directory to `apps/web`. Vercel detects Vite, runs the lockfile install and `npm run build`, and publishes `apps/web/dist`.
+3. Configure environment variables under **Settings → Environment Variables**, then redeploy:
+   - **API project:** `PUMPGUARD_CORS_ORIGINS` set to the exact web origin (comma-separated for more than one, no trailing slash, for example `https://pumpguard.vercel.app`). `PUMPGUARD_DIAGNOSTIC_PROVIDER=mock` is the bounded demo default and can be set explicitly. AMD stays optional: `PUMPGUARD_DIAGNOSTIC_PROVIDER=amd` plus encrypted `RADEON_API_KEY`, `RADEON_BASE_URL`, and `RADEON_MODEL` values.
+   - **Web project:** `VITE_API_BASE_URL` set to the API project's URL with no trailing slash. This is a build-time value, so set it before the first successful deploy or redeploy afterwards.
+4. Under **Settings → Git**, connect both projects to the repository so every push redeploys both and the frontend always embeds the current API URL.
+
+Smoke test in order: `GET https://<api-host>/health` returns HTTP 200, `POST https://<api-host>/api/v1/simulation/generate` with the documented body returns HTTP 200, then `GET https://<web-host>` returns the UI and telemetry updates after **Generate simulation**.
+
+Vercel-specific behavior, stated explicitly:
+
+- The API runs as one serverless function per warm instance. Pump registry, telemetry history, live-simulation state, and rate-limit counters are process-local, so after an idle cold start they reset; press **Generate simulation** again if the UI reports an unknown pump. The documented process-local rate limits apply per instance and are keyed by the platform's shared proxy address rather than per end user, so raise `PUMPGUARD_RATE_LIMIT_*` on the API project if concurrent testers hit 429 earlier than expected. These limits are still not a distributed rate limiter.
+- The function `maxDuration` is 60 seconds (root `vercel.json`), which bounds any AMD call; mock diagnostics respond immediately, and if you enable AMD keep `PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS` comfortably below the limit.
+- Web preview deployments receive their own origin (for example `https://pumpguard-web-git-<branch>.vercel.app`); add that origin to `PUMPGUARD_CORS_ORIGINS` before testing previews, or validate on the production deployment only. CORS is still not access control.
+- The API function bundle excludes `apps/`, `tests/`, `docs/`, and `scripts/` (root `vercel.json`); the web project never sees them because its Root Directory is `apps/web`. The API request path performs no disk writes, which fits the read-only serverless filesystem; state lives in process memory only, as documented.
+- Browser API calls time out after 8 seconds except diagnostic explanations, which allow tens of seconds; cold-start imports stay well inside that window.
