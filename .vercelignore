@@ -1,0 +1,17 @@
+# Vercel CLI upload exclusions for the API deployment (git-push flow unaffected).
+# Leading slashes anchor to the repository root so subpackages such as
+# src/pumpguard/models and src/pumpguard/data are NOT stripped by these rules.
+/.venv/
+/.git/
+/node_modules/
+/.npm-cache/
+/apps/
+/data/
+/models/
+/docs/
+/tests/
+/scripts/
+*.log
+/.env
+/.env.*
+!/.env.example

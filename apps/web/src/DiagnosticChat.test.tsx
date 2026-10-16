@@ -20,6 +20,7 @@ describe('DiagnosticChat', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByText('Why is it warning?')).toBeInTheDocument();
     expect(await screen.findByText(/Inspect the measured vibration/)).toBeInTheDocument();
+    expect(screen.getByText(/TEST MOCK — not AMD-generated/)).toBeInTheDocument();
     expect(api.diagnosticChat).toHaveBeenCalledWith({ pump_id: 'pump-01', question: 'Why is it warning?', history: [] });
   });
 
@@ -60,6 +61,7 @@ describe('DiagnosticChat', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByText('warning')).toBeInTheDocument();
     expect(screen.getByText('warning').tagName).toBe('STRONG');
+    expect(screen.getByText(/AMD-generated response/)).toBeInTheDocument();
     expect(screen.queryByRole('script')).not.toBeInTheDocument();
     expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument();
   });

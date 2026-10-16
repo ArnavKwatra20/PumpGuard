@@ -87,6 +87,8 @@ def test_ai_feature_provider_failure_is_explicit_and_does_not_replace_rules():
         })
         assessment = client.get("/api/v1/pumps/feature-pump/assessment").json()
     assert response.status_code == 504
+    assert "No AMD-generated response was produced" in response.json()["detail"]
+    assert "rule-based assessment remains authoritative" in response.json()["detail"]
     assert assessment == generated["assessment"]
 
 

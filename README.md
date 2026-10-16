@@ -195,7 +195,7 @@ The dashboard validates and plots all five supported API scenario identifiers fr
 
 An active warning or critical alert episode starts one repeating, alternating 740/520 Hz Web Audio pattern with short tone bursts and quiet gaps. The loop is idempotent across polling and React rerenders. **ACKNOWLEDGE ALARM — SILENCE SIREN** acknowledges only its episode; it silences the loop when no other active unacknowledged episode remains. Acknowledgement does not resolve the condition: the alert and component highlight remain until a fresh backend assessment no longer reports it. Severity changes update the same episode, so routine warning/critical fluctuations cannot create a fresh siren or restore its acknowledgement action. A later distinct episode can sound again. If autoplay is blocked, the UI reports that state and the one-time **Enable sound alerts** control unlocks playback, including a still-active alarm. Muting stops the sound while leaving visual alerts active. Acknowledgement and event history are held in frontend memory for the current page session only; they are not persisted across reloads or shared between operators. Audio behavior was verified through automated Web Audio mocks; actual audible speaker output was not confirmed in this run and depends on browser/device audio settings. All findings remain synthetic rule-engine alerts, not claims of physical damage.
 
-Verification: the frontend suite has 90 passing tests across 12 files, the backend suite has 158 passing tests with one existing Starlette/httpx deprecation warning, and `npm run build` succeeds (with the documented Three.js chunk-size advisory). The running browser verified live telemetry, an overheating assessment, alert history, pause/stop controls, and AMD catalog inspection; no test or browser check constitutes validation on real industrial equipment.
+Verification: the frontend suite has 91 passing tests across 12 files, the backend suite has 163 passing tests with one existing Starlette/httpx deprecation warning, and `npm run build` succeeds (with the documented Three.js chunk-size advisory). The running browser verified live telemetry, an overheating assessment, alert history, pause/stop controls, and AMD catalog inspection; no test or browser check constitutes validation on real industrial equipment.
 
 Launch as in Phase 4.1: run `uvicorn apps.api.main:app --host 127.0.0.1 --port 8001 --reload` from `D:\Hackathon\PumpGuard` with `.venv` activated, then run `npm run dev` from `D:\Hackathon\PumpGuard\apps\web` and open `http://127.0.0.1:5173`. Choose a scenario and click **Generate simulation**. Observe the sensor readings, discharge pressure, latest-sample time, charts, rule assessment, and alert history updating continuously.
 
@@ -254,7 +254,14 @@ The Diagnosis page also exposes optional maintenance-planner, telemetry-explanat
 
 ## Vercel deployment (two projects, one repository)
 
-This repository deploys to Vercel as two projects built from the same GitHub repository, matching the documented shape of a static frontend host plus one Python backend service. No provider-specific application code is required: the backend entry point is the root `app.py`, which Vercel's Python runtime auto-detects (FastAPI is detected from `requirements.txt`) and routes backend traffic to. Local development is unchanged (`uvicorn apps.api.main:app`).
+Live production deployments (Hobby plan; both projects are connected to this repository through the Vercel Git integration, so pushes to `master` redeploy the affected project):
+
+- API: https://pumpguard-steel.vercel.app (project `pumpguard`; the shorter `pumpguard.vercel.app` alias was already taken globally, so Vercel auto-aliased)
+- Web: https://pumpguard-web.vercel.app (project `pumpguard-web`)
+
+Both projects were created non-interactively with the Vercel CLI (`vercel link --yes --project …`, `vercel env add …`, `vercel deploy --prod`); the dashboard steps below are the equivalent manual flow.
+
+This repository deploys to Vercel as a Vite frontend and a FastAPI backend. The backend project is `pumpguard` (`https://pumpguard-steel.vercel.app`); the separate `pumpguard-api` project is a failed duplicate and is not used by the frontend. The backend entry point is the root `app.py`, an ASGI module that exports `app` from the FastAPI factory after adding `src/` to `sys.path`. Vercel's FastAPI framework detection supports this entry point. The root `vercel.json` deliberately has no `functions` glob: those patterns match functions under `/api`, and pointing one at root `app.py` caused the `unused_function` build failure. Local development is unchanged (`uvicorn apps.api.main:app`).
 
 1. Push this repository to GitHub, for example:
 
@@ -264,7 +271,7 @@ This repository deploys to Vercel as two projects built from the same GitHub rep
    ```
 
 2. In the Vercel dashboard choose **Add New → Project** and import the same repository twice:
-   - **API project** — leave Root Directory at the repository root. Vercel detects FastAPI and deploys `app.py` as a single function; no build command or output directory is needed. Deploy it first and note its URL (for example `https://pumpguard.vercel.app`).
+   - **API project** — leave Root Directory at the repository root. Vercel deploys the root `app.py` as a single Python function; no build command or output directory is needed. Deploy it first and note its URL (for example `https://pumpguard-steel.vercel.app`).
    - **Web project** — set Root Directory to `apps/web`. Vercel detects Vite, runs the lockfile install and `npm run build`, and publishes `apps/web/dist`.
 3. Configure environment variables under **Settings → Environment Variables**, then redeploy:
    - **API project:** `PUMPGUARD_CORS_ORIGINS` set to the exact web origin (comma-separated for more than one, no trailing slash, for example `https://pumpguard.vercel.app`). `PUMPGUARD_DIAGNOSTIC_PROVIDER=mock` is the bounded demo default and can be set explicitly. AMD stays optional: `PUMPGUARD_DIAGNOSTIC_PROVIDER=amd` plus encrypted `RADEON_API_KEY`, `RADEON_BASE_URL`, and `RADEON_MODEL` values.
@@ -276,7 +283,7 @@ Smoke test in order: `GET https://<api-host>/health` returns HTTP 200, `POST htt
 Vercel-specific behavior, stated explicitly:
 
 - The API runs as one serverless function per warm instance. Pump registry, telemetry history, live-simulation state, and rate-limit counters are process-local, so after an idle cold start they reset; press **Generate simulation** again if the UI reports an unknown pump. The documented process-local rate limits apply per instance and are keyed by the platform's shared proxy address rather than per end user, so raise `PUMPGUARD_RATE_LIMIT_*` on the API project if concurrent testers hit 429 earlier than expected. These limits are still not a distributed rate limiter.
-- The function `maxDuration` is 60 seconds (root `vercel.json`), which bounds any AMD call; mock diagnostics respond immediately, and if you enable AMD keep `PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS` comfortably below the limit.
+- The production diagnostic provider currently reports `mock_test_mode`; no AMD-generated response is being served. The production backend has no `RADEON_API_KEY` environment variable configured. Configure AMD credentials only on the backend project, then verify an end-to-end diagnostic request before describing responses as AMD-generated. The Vercel project timeout is not set by `vercel.json`; keep the backend diagnostic timeout below the project's configured function limit if AMD is enabled.
 - Web preview deployments receive their own origin (for example `https://pumpguard-web-git-<branch>.vercel.app`); add that origin to `PUMPGUARD_CORS_ORIGINS` before testing previews, or validate on the production deployment only. CORS is still not access control.
-- The API function bundle excludes `apps/`, `tests/`, `docs/`, and `scripts/` (root `vercel.json`); the web project never sees them because its Root Directory is `apps/web`. The API request path performs no disk writes, which fits the read-only serverless filesystem; state lives in process memory only, as documented.
+- The API bundle excludes local-only `apps/`, `tests/`, `docs/`, and `scripts/` paths through the root `.vercelignore`; the web project has its own ignore file under `apps/web`. The API request path performs no disk writes, which fits the read-only serverless filesystem; state lives in process memory only, as documented.
 - Browser API calls time out after 8 seconds except diagnostic explanations, which allow tens of seconds; cold-start imports stay well inside that window.

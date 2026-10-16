@@ -73,7 +73,7 @@ export interface DiagnosticResult {
   ml_prediction?: { label: Scenario; score: number; model_version: string; compute_provider: 'cpu' | 'amd_rocm' | 'cuda'; device: string; execution_path: string } | null;
 }
 
-export interface DiagnosticProviderStatus { provider: 'mock' | 'amd' | 'amd_unavailable'; available: boolean; is_mock: boolean; configured?: boolean; model?: string | null }
+export interface DiagnosticProviderStatus { provider: 'mock' | 'amd' | 'amd_unavailable'; state?: 'mock_test_mode' | 'amd_configured' | 'amd_unconfigured'; available: boolean; is_mock: boolean; configured?: boolean; model?: string | null }
 export interface DiagnosticChatMessage { role: 'user' | 'assistant'; content: string; timestamp?: string }
 export interface DiagnosticChatRequest { pump_id: string; question: string; history: Pick<DiagnosticChatMessage, 'role' | 'content'>[] }
 export interface DiagnosticChatResponse { assistant_message: string; provider: 'mock' | 'amd' | 'amd_unavailable'; is_mock: boolean; latency_ms: number }

@@ -14,6 +14,11 @@ from pumpguard.services.telemetry_service import UnknownPumpError
 
 router = APIRouter(tags=["ai-features"])
 
+
+def _provider_failure_detail(exc: Exception) -> str:
+    return (f"{exc}. No AMD-generated response was produced; "
+            "the rule-based assessment remains authoritative.")
+
 _QUESTIONS = {
     "maintenance_planner": (
         "Create a concise AI-generated draft maintenance plan. Include only the current rule finding, exact supporting "
@@ -67,17 +72,17 @@ async def ai_feature(payload: AiFeatureRequest, request: Request) -> AiFeatureRe
     try:
         result = await request.app.state.diagnostic_chat_service.respond(chat_request, context)
     except DiagnosticTimeout as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
+        raise HTTPException(status_code=504, detail=_provider_failure_detail(exc)) from exc
     except ProviderRateLimited as exc:
-        raise HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "1"}) from exc
+        raise HTTPException(status_code=429, detail=_provider_failure_detail(exc), headers={"Retry-After": "1"}) from exc
     except ProviderTimedOut as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
+        raise HTTPException(status_code=504, detail=_provider_failure_detail(exc)) from exc
     except ProviderInvalidResponse as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=_provider_failure_detail(exc)) from exc
     except ProviderUnsupportedModel as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=_provider_failure_detail(exc)) from exc
     except ProviderUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=_provider_failure_detail(exc)) from exc
     return AiFeatureResponse(feature=payload.feature, assistant_message=result.assistant_message,
                              provider=result.provider, is_mock=result.is_mock, latency_ms=result.latency_ms,
                              evidence_timestamp=latest_payload["timestamp"])

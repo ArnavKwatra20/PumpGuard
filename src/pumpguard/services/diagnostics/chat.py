@@ -148,6 +148,20 @@ def _grounding_excerpt(text: str, match: re.Match[str]) -> str:
     return excerpt[:96]
 
 
+class UnsupportedNumericEvidence(ProviderInvalidResponse):
+    """Grounding failure with bounded, content-safe correction hints for one AMD retry."""
+
+    def __init__(self, claims: list[tuple[str, str]]) -> None:
+        self.claims = tuple(dict.fromkeys(claims))
+        labels = ", ".join(f"{token} ({family})" for token, family in self.claims[:8])
+        super().__init__("Diagnostic chat returned unsupported numerical evidence")
+        self.feedback = (
+            f"Your previous draft included unsupported numerical claims: {labels}. "
+            "Remove those claims, or use only exact values for the matching metric family from the "
+            "authoritative context. Do not estimate or infer values. Return the complete corrected answer."
+        )
+
+
 def _normalize_chat_content(text: str) -> str:
     """Accept provider text and normalize harmless formatting issues."""
     normalized = text.replace("\r\n", "\n").replace(r"\*\*", "**").strip()
@@ -178,7 +192,7 @@ def _validate_numeric_grounding(text: str, context: dict[str, object]) -> None:
     """Reject unsupported measurements while ignoring list ordinals and metadata identifiers."""
     timestamp_spans = [match.span() for match in _TIMESTAMP_PATTERN.finditer(text)]
     allowed_by_family = _numeric_values(context)
-    unsupported: list[str] = []
+    unsupported: list[tuple[str, str]] = []
     for match in _NUMBER_PATTERN.finditer(text):
         if _is_non_evidentiary_number(text, match, timestamp_spans):
             continue
@@ -186,7 +200,7 @@ def _validate_numeric_grounding(text: str, context: dict[str, object]) -> None:
         family = _claim_family(text, match)
         allowed = allowed_by_family[family] if family else set().union(*allowed_by_family.values())
         if not _matches_grounded_value(float(token), token, allowed):
-            unsupported.append(token)
+            unsupported.append((token, family or "unknown"))
             reason = ("no-authoritative-values-for-metric-family" if family and not allowed
                       else "value-not-present-or-outside-rounding-tolerance")
             logger.warning(
@@ -194,7 +208,7 @@ def _validate_numeric_grounding(text: str, context: dict[str, object]) -> None:
                 token, _grounding_excerpt(text, match), family or "unknown", reason,
             )
     if unsupported:
-        raise ProviderInvalidResponse("Diagnostic chat returned unsupported numerical evidence")
+        raise UnsupportedNumericEvidence(unsupported)
 
 
 class DiagnosticChatService:
@@ -211,7 +225,27 @@ class DiagnosticChatService:
             if not isinstance(text, str) or not text.strip():
                 raise ProviderInvalidResponse("Diagnostic chat returned empty assistant content")
             text = _normalize_chat_content(text)
-            _validate_numeric_grounding(text, context)
+            try:
+                _validate_numeric_grounding(text, context)
+            except UnsupportedNumericEvidence as exc:
+                # A single correction helps recover from occasional model fabrication while
+                # preserving the same total request deadline and fail-closed validation.
+                if self.provider.name != "amd":
+                    raise
+                remaining = self.timeout_seconds - (time.perf_counter() - started)
+                if remaining <= 0.05:
+                    raise
+                retry_context = dict(context)
+                retry_context["_numeric_grounding_feedback"] = exc.feedback
+                logger.warning("diagnostic chat grounding repair provider=amd retry=1 rejected_claims=%d",
+                               len(exc.claims))
+                text = await asyncio.wait_for(
+                    self.provider.chat(request, retry_context), timeout=remaining  # type: ignore[attr-defined]
+                )
+                if not isinstance(text, str) or not text.strip():
+                    raise ProviderInvalidResponse("Diagnostic chat returned empty assistant content")
+                text = _normalize_chat_content(text)
+                _validate_numeric_grounding(text, context)
             latency = (time.perf_counter() - started) * 1000
             result = DiagnosticChatResponse(
                 assistant_message=text, provider=self.provider.name,

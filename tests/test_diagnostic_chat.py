@@ -1,3 +1,5 @@
+import json
+
 import httpx
 from fastapi.testclient import TestClient
 from openai import OpenAI
@@ -73,6 +75,8 @@ def test_chat_provider_failure_preserves_rule_assessment():
         response = client.post("/api/v1/diagnostics/chat", json={"pump_id": "chat-pump", "question": "What happened?"})
         assessment = client.get("/api/v1/pumps/chat-pump/assessment").json()
     assert response.status_code == 504
+    assert "No AMD-generated response was produced" in response.json()["detail"]
+    assert "rule-based assessment remains authoritative" in response.json()["detail"]
     assert assessment == generated["assessment"]
 
 
@@ -205,6 +209,77 @@ def test_chat_allows_supported_value_but_rejects_unsupported_numeric_claim(caplo
     assert messages and "token='42.0'" in messages[-1]
 
 
+def test_amd_chat_retries_once_with_grounding_feedback_and_accepts_corrected_answer():
+    class CorrectingAMDProvider(RecordingChatProvider):
+        name = "amd"
+
+        def __init__(self):
+            super().__init__()
+            self.responses = [
+                "The vibration is 999.9 mm/s; inspect the bearing.",
+                "The rule assessment supports inspecting the bearing and vibration sensor.",
+            ]
+
+        async def chat(self, request, context):
+            self.requests.append(request)
+            self.contexts.append(context)
+            return self.responses[len(self.requests) - 1]
+
+    provider = CorrectingAMDProvider()
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        client.post("/api/v1/simulation/generate", json=seed_request())
+        response = client.post("/api/v1/diagnostics/chat", json={
+            "pump_id": "chat-pump", "question": "What should I inspect?",
+        })
+
+    assert response.status_code == 200, response.text
+    assert response.json()["provider"] == "amd"
+    assert response.json()["is_mock"] is False
+    assert response.json()["assistant_message"] == provider.responses[1]
+    assert len(provider.requests) == 2
+    assert "999.9 (vibration)" in provider.contexts[1]["_numeric_grounding_feedback"]
+    assert "_numeric_grounding_feedback" not in provider.contexts[0]
+
+
+def test_amd_chat_fails_closed_after_one_unsupported_numeric_retry():
+    class StillUnsupportedAMDProvider(RecordingChatProvider):
+        name = "amd"
+
+        def __init__(self):
+            super().__init__()
+
+        async def chat(self, request, context):
+            self.requests.append(request)
+            self.contexts.append(context)
+            return "The vibration is 999.9 mm/s; inspect the bearing."
+
+    provider = StillUnsupportedAMDProvider()
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        client.post("/api/v1/simulation/generate", json=seed_request())
+        response = client.post("/api/v1/diagnostics/chat", json={
+            "pump_id": "chat-pump", "question": "What should I inspect?",
+        })
+        assessment = client.get("/api/v1/pumps/chat-pump/assessment")
+
+    assert response.status_code == 502
+    assert "No AMD-generated response was produced" in response.json()["detail"]
+    assert len(provider.requests) == 2
+    assert "999.9 (vibration)" in provider.contexts[1]["_numeric_grounding_feedback"]
+    assert assessment.status_code == 200
+
+
+def test_mock_chat_does_not_retry_numeric_grounding_failures():
+    provider = RecordingChatProvider("The vibration is 999.9 mm/s; inspect the bearing.")
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        client.post("/api/v1/simulation/generate", json=seed_request())
+        response = client.post("/api/v1/diagnostics/chat", json={
+            "pump_id": "chat-pump", "question": "What should I inspect?",
+        })
+
+    assert response.status_code == 502
+    assert len(provider.requests) == 1
+
+
 def test_chat_condition_change_question_accepts_grounded_trend_values_and_rejects_unsupported_change_claim(caplog):
     class ConditionChangeProvider(RecordingChatProvider):
         async def chat(self, request, context):
@@ -276,6 +351,36 @@ def test_amd_chat_uses_final_content_not_reasoning_and_validates_envelope():
     assert response.status_code == 200, response.text
     assert response.json()["assistant_message"].startswith("Use the measured")
     assert "reasoning" not in response.text.lower()
+
+
+def test_amd_adapter_sends_grounding_feedback_as_system_instruction_and_revalidates():
+    chat_requests = []
+
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "DeepSeek-V4-Flash"}]})
+        body = json.loads(request.content)
+        chat_requests.append(body)
+        content = ("The vibration is 999.9 mm/s; inspect the bearing." if len(chat_requests) == 1
+                   else "Inspect the vibration sensor and bearing based on the current assessment.")
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {
+            "role": "assistant", "content": content}}]})
+
+    provider = AmdProvider("https://amd.example/v1", "DeepSeek-V4-Flash", "unit-test-secret", client=amd_client(handler))
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        client.post("/api/v1/simulation/generate", json=seed_request())
+        response = client.post("/api/v1/diagnostics/chat", json={
+            "pump_id": "chat-pump", "question": "What should I inspect?",
+        })
+
+    assert response.status_code == 200, response.text
+    assert response.json()["provider"] == "amd"
+    assert response.json()["is_mock"] is False
+    assert len(chat_requests) == 2
+    retry_system = chat_requests[1]["messages"][0]["content"]
+    retry_context = chat_requests[1]["messages"][1]["content"]
+    assert "999.9 (vibration)" in retry_system
+    assert "_numeric_grounding_feedback" not in retry_context
 
 
 def test_amd_chat_prompt_forbids_unseen_numeric_estimates():

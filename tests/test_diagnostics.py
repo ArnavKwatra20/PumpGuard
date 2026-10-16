@@ -29,7 +29,10 @@ def request_body():
 def test_mock_provider_returns_valid_explicitly_labeled_diagnostic():
     provider = MockDiagnosticProvider()
     with TestClient(create_app(diagnostic_provider=provider)) as client:
-        assert client.get("/api/v1/diagnostics/status").json() == {"provider": "mock", "available": True, "is_mock": True}
+        assert client.get("/api/v1/diagnostics/status").json() == {
+            "provider": "mock", "state": "mock_test_mode", "available": True,
+            "is_mock": True, "configured": False, "model": None,
+        }
         response = client.post("/api/v1/diagnostics", json=request_body())
     assert response.status_code == 200
     result = response.json()
@@ -62,9 +65,21 @@ def test_amd_provider_starts_without_credentials_but_reports_unavailable(monkeyp
         assert client.get("/health").status_code == 200
         status = client.get("/api/v1/diagnostics/status").json()
         result = client.post("/api/v1/diagnostics", json=request_body())
-    assert status["provider"] == "amd_unavailable" and status["available"] is False
+    assert status["provider"] == "amd_unavailable" and status["state"] == "amd_unconfigured"
+    assert status["available"] is False
     assert status["configured"] is False and "RADEON_API_KEY" not in str(status)
     assert result.status_code == 503
+
+
+def test_amd_status_marks_credentials_as_configured_without_claiming_a_live_health_check(monkeypatch):
+    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_PROVIDER", "amd")
+    monkeypatch.setenv("RADEON_API_KEY", "unit-test-secret")
+    with TestClient(create_app()) as client:
+        status = client.get("/api/v1/diagnostics/status").json()
+    assert status == {
+        "provider": "amd", "state": "amd_configured", "available": True,
+        "is_mock": False, "configured": True, "model": "DeepSeek-V4-Flash",
+    }
 
 
 def test_diagnostic_input_is_bounded_and_rejects_inconsistent_episode():

@@ -15,9 +15,13 @@ MAX_DIAGNOSTIC_REQUEST_BYTES = 32 * 1024
 def diagnostic_status(request: Request) -> dict[str, object]:
     provider = request.app.state.diagnostic_service.provider
     if provider.name == "mock":
-        return {"provider": "mock", "available": True, "is_mock": True}
-    return {"provider": provider.name, "available": False, "is_mock": False,
-            "configured": bool(getattr(provider, "configured", False)),
+        return {"provider": "mock", "state": "mock_test_mode", "available": True,
+                "is_mock": True, "configured": False, "model": None}
+    configured = bool(getattr(provider, "configured", False))
+    return {"provider": provider.name,
+            "state": "amd_configured" if configured else "amd_unconfigured",
+            # This is configuration readiness, not a live upstream health check.
+            "available": configured, "is_mock": False, "configured": configured,
             "model": getattr(provider, "model", None)}
 
 

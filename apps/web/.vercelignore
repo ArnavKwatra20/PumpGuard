@@ -1,0 +1,6 @@
+# Vercel CLI upload exclusions for the frontend deployment.
+node_modules/
+dist/
+.vercel/
+*.log
+npm-debug.log*

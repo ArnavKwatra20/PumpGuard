@@ -35,3 +35,6 @@ PUMPGUARD_AUDIT_REPORT.md
 # Experiment/benchmark artifacts (e.g. phase3b_mlp.pt, phase4_ml_evaluation_mlp.pt) stay ignored.
 models/*.pt
 !models/pumpguard_mlp.pt
+
+.vercel
+.env*

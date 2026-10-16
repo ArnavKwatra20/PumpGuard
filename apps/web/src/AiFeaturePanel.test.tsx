@@ -31,8 +31,16 @@ describe('AiFeaturePanel', () => {
     setup(request);
     fireEvent.click(screen.getByRole('button', { name: 'Draft maintenance plan' }));
     expect(await screen.findByText('Inspect first')).toBeInTheDocument();
+    expect(screen.getByText(/TEST MOCK — not AMD-generated/)).toBeInTheDocument();
     expect(screen.getByText('Inspect first').tagName).toBe('STRONG');
     expect(request).toHaveBeenCalledWith({ pump_id: 'pump-01', feature: 'maintenance_planner', client_session_id: 'session-01' });
+  });
+
+  it('labels a real provider response as AMD-generated only when provider metadata confirms it', async () => {
+    const request = vi.fn().mockResolvedValue({ ...response, provider: 'amd', is_mock: false });
+    setup(request);
+    fireEvent.click(screen.getByRole('button', { name: 'Draft maintenance plan' }));
+    expect(await screen.findByText(/AMD-generated response/)).toBeInTheDocument();
   });
 
   it('shows provider failures and retries without fabricating a result', async () => {

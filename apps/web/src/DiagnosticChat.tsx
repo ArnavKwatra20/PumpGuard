@@ -45,7 +45,7 @@ export function renderAssistantContent(content: string): ReactNode {
 }
 
 export function DiagnosticChat({ api, pumpId, contextAvailable }: Props) {
-  const [messages, setMessages] = useState<DiagnosticChatMessage[]>([]);
+  const [messages, setMessages] = useState<(DiagnosticChatMessage & { provider?: 'mock' | 'amd' | 'amd_unavailable'; is_mock?: boolean })[]>([]);
   const [question, setQuestion] = useState('');
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<{ question: string; message: string } | null>(null);
@@ -69,7 +69,7 @@ export function DiagnosticChat({ api, pumpId, contextAvailable }: Props) {
     setSending(true);
     try {
       const result = await api.diagnosticChat({ pump_id: pumpId, question: value, history });
-      setMessages((current) => [...current, { role: 'assistant', content: result.assistant_message, timestamp: new Date().toISOString() }]);
+      setMessages((current) => [...current, { role: 'assistant', content: result.assistant_message, timestamp: new Date().toISOString(), provider: result.provider, is_mock: result.is_mock }]);
     } catch (error) {
       setFailure({ question: value, message: error instanceof Error ? error.message : 'Diagnostic assistant request failed.' });
     } finally {
@@ -102,7 +102,7 @@ export function DiagnosticChat({ api, pumpId, contextAvailable }: Props) {
     <div className="diagnostic-chat-log" role="log" aria-live="polite" aria-label="Diagnostic conversation">
       {!messages.length && <p className="chat-empty">Ask a focused question about the current evidence.</p>}
       {messages.map((message, index) => <article className={`chat-message ${message.role}`} key={`${message.timestamp ?? 'message'}-${index}`}>
-        <div className="chat-message-meta"><b>{message.role === 'user' ? 'YOU' : 'ASSISTANT'}</b><time dateTime={message.timestamp}>{message.timestamp ? displayTime(message.timestamp) : ''}</time></div>
+        <div className="chat-message-meta"><b>{message.role === 'user' ? 'YOU' : 'ASSISTANT'}</b>{message.role === 'assistant' && <span>{message.provider === 'amd' && !message.is_mock ? 'AMD-generated response' : message.is_mock ? 'TEST MOCK — not AMD-generated' : 'Provider unavailable'}</span>}<time dateTime={message.timestamp}>{message.timestamp ? displayTime(message.timestamp) : ''}</time></div>
         <div className="chat-message-content">{renderAssistantContent(message.content)}</div>
       </article>)}
       {sending && <div className="chat-loading" role="status"><span className="loading-dot" /> Consulting the configured diagnostic provider…</div>}

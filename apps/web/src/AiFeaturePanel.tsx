@@ -62,7 +62,7 @@ export function AiFeaturePanel({ api, pumpId, clientSessionId, contextAvailable,
     {loading && <p className="ai-feature-status" role="status">Generating a bounded, evidence-grounded draft…</p>}
     {error && <div className="ai-feature-error" role="alert"><span>{error}</span><button type="button" onClick={() => void requestFeature()} disabled={loading}>Retry</button></div>}
     {result && <article className="ai-feature-result">
-      <div className="ai-feature-result-meta"><b>{FEATURES.find((feature) => feature.kind === result.feature)?.label}</b><span>{result.provider === 'amd' ? 'AMD response' : result.is_mock ? 'Offline mock' : 'Provider unavailable'} · {Math.round(result.latency_ms)} ms · evidence {new Date(result.evidence_timestamp).toLocaleTimeString()}</span></div>
+      <div className="ai-feature-result-meta"><b>{FEATURES.find((feature) => feature.kind === result.feature)?.label}</b><span>{result.provider === 'amd' && !result.is_mock ? 'AMD-generated response' : result.is_mock ? 'TEST MOCK — not AMD-generated' : 'Provider unavailable — not an AMD diagnosis'} · {Math.round(result.latency_ms)} ms · evidence {new Date(result.evidence_timestamp).toLocaleTimeString()}</span></div>
       <div className="chat-message-content">{renderAssistantContent(result.assistant_message)}</div>
     </article>}
   </section>;

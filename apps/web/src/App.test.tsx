@@ -69,6 +69,7 @@ describe('digital twin dashboard', () => {
     expect(screen.getByRole('region', { name: 'System status and operating measurements' })).toBeInTheDocument();
     expect(screen.getByText(/Frequency-domain data is not supplied/)).toBeInTheDocument();
     expect(screen.getByLabelText('Motor speed')).toBeInTheDocument();
+    expect(screen.getByLabelText('Pump identity')).toHaveAttribute('pattern', '[A-Za-z0-9][A-Za-z0-9_.\\-]*');
   });
 
   it('displays actual returned sensor values and assessment separately from the model label', async () => {
