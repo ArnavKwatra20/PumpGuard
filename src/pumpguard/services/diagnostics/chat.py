@@ -207,16 +207,17 @@ def _claim_role(text: str, match: re.Match[str], family: str | None) -> str:
     roles = (
         (r"\bcritical\s+(?:threshold|limit|range)\b", "critical_threshold"),
         (r"\b(?:threshold|limit|range)\b", "threshold"),
-        (r"\b(?:below|under|above|over)\s+(?:the\s+)?", "threshold"),
+        (r"\b(?:below|under|above)\s+(?:the\s+)?", "threshold"),
         (r"\bwithin\b", "threshold"),
         (r"\b(?:health\s+)?score\b", "score"),
-        (r"\b(?:samples?|readings?|measurements?)\b", "samples"),
+        (r"\b(?:samples|readings|measurements)\b", "samples"),
         (r"\b(?:times?\s+(?:above|over|below|under)|excursions?)\b", "excursions"),
         (r"\b(?:mean|average|avg)\b", "mean"),
         (r"\b(?:minimum|min|lowest)\b", "minimum"),
         (r"\b(?:maximum|max|peak|highest)\b", "maximum"),
         (r"\b(?:rate|slope|per\s+second)\b", "rate"),
         (r"\b(?:elapsed|duration)\b", "duration"),
+        (r"\bchange\s+(?:over|across|during)\s+(?:the\s+)?(?:window|period|interval)\b", "delta"),
         (r"\b(?:increased|decreased|changed|rose|dropped|fell|delta|change)\s+(?:by|of)\b", "delta"),
         (r"\b(?:initial|first|starting|began|started)\b", "first"),
     )
@@ -224,6 +225,8 @@ def _claim_role(text: str, match: re.Match[str], family: str | None) -> str:
     for pattern, role in roles:
         for marker in re.finditer(pattern, window):
             absolute_start, absolute_end = window_start + marker.start(), window_start + marker.end()
+            if role == "delta" and absolute_start >= end:
+                continue
             distance = absolute_start - end if absolute_start >= end else start - absolute_end
             max_distance = 8 if role == "samples" else 2 if role == "score" else 24 if role in {"threshold", "critical_threshold"} else 18
             if distance <= max_distance:
