@@ -37,7 +37,9 @@ _CHAT_SYSTEM_INSTRUCTIONS = (
     "a remembered setpoint/threshold. If an exact number is unavailable, omit it and state that the evidence is "
     "insufficient. For trend statements, use only the deterministic recorded trend analysis for the same metric and "
     "window: first_value is the beginning, latest_value is the end, delta is the change, and mean/threshold values "
-    "have separate roles. Do not substitute values from individual recent samples for trend endpoints."
+    "have separate roles. Do not substitute values from individual recent samples for trend endpoints. For a focused "
+    "trend question, include only the requested metric and trend facts; omit extra counts, thresholds, excursions, "
+    "durations, and other metric values unless the user asked for them."
 )
 
 

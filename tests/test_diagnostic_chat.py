@@ -383,6 +383,18 @@ def test_chat_accepts_numeric_endpoints_and_change_over_the_window():
     )
 
 
+def test_chat_accepts_delta_label_without_confusing_latest_value_or_threshold():
+    context = _bearing_trend_context()
+    context["latest_telemetry"]["vibration_mm_s"] = 7.59
+    metric = context["recorded_trend_analysis"]["metrics"][0]
+    metric.update(first_value=6.89, latest_value=7.59, delta=0.70)
+    _validate_numeric_grounding(
+        "Vibration increased from 6.89 to 7.59 mm/s. Change: +0.70 mm/s. "
+        "The warning threshold is 4.5 mm/s.",
+        context,
+    )
+
+
 def test_chat_rejects_values_found_in_other_samples_but_not_the_trend_roles():
     with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
         _validate_numeric_grounding(
