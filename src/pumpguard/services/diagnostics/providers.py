@@ -39,7 +39,10 @@ _CHAT_SYSTEM_INSTRUCTIONS = (
     "window: first_value is the beginning, latest_value is the end, delta is the change, and mean/threshold values "
     "have separate roles. Do not substitute values from individual recent samples for trend endpoints. For a focused "
     "trend question, include only the requested metric and trend facts; omit extra counts, thresholds, excursions, "
-    "durations, and other metric values unless the user asked for them."
+    "durations, and other metric values unless the user asked for them. When asked which telemetry signals support "
+    "the current assessment, report only findings listed in current_rule_assessment.anomalies, with their exact "
+    "observed_value and expected_range; do not add trend summaries, means, sample or excursion counts, or unaffected "
+    "signals unless requested. If there are no anomalies, say that no configured threshold finding supports a warning."
 )
 
 

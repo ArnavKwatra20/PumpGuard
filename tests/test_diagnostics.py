@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from pumpguard.api.app import create_app
 from pumpguard.models.diagnostic import DiagnosticRequest
-from pumpguard.services.diagnostics.providers import MockDiagnosticProvider, ProviderRateLimited
+from pumpguard.services.diagnostics.providers import MockDiagnosticProvider, ProviderInvalidResponse, ProviderRateLimited
 from pumpguard.services.diagnostics.service import DiagnosticService
 
 
@@ -65,6 +65,31 @@ def test_mismatched_trend_window_is_rejected_before_provider_call():
         response = client.post("/api/v1/diagnostics", json=body)
     assert response.status_code == 502
     assert provider.calls == 0
+
+
+def test_trend_elapsed_accepts_only_javascript_millisecond_precision_difference():
+    body = request_body()
+    body["telemetry"] = [
+        {**body["telemetry"][0], "timestamp": "2025-01-01T00:00:00.123900Z", "vibration_mm_s": 6.0},
+        {**body["telemetry"][0], "timestamp": "2025-01-01T00:00:01.124100Z", "vibration_mm_s": 7.5},
+    ]
+    # Date.parse truncates these timestamp fractions to milliseconds (1.001 s),
+    # while Python computes the exact difference (1.0002 s).
+    body["trends"] = [{"metric": "vibration_mm_s", "initial_value": 6.0, "latest_value": 7.5,
+                       "delta": 1.5, "elapsed_seconds": 1.001, "samples": 2}]
+    DiagnosticService._validate_request_trends(DiagnosticRequest.model_validate(body))
+
+
+def test_trend_elapsed_rejects_a_difference_beyond_browser_timestamp_precision():
+    body = request_body()
+    body["telemetry"] = [
+        {**body["telemetry"][0], "timestamp": "2025-01-01T00:00:00.123900Z", "vibration_mm_s": 6.0},
+        {**body["telemetry"][0], "timestamp": "2025-01-01T00:00:01.124100Z", "vibration_mm_s": 7.5},
+    ]
+    body["trends"] = [{"metric": "vibration_mm_s", "initial_value": 6.0, "latest_value": 7.5,
+                       "delta": 1.5, "elapsed_seconds": 1.003, "samples": 2}]
+    with pytest.raises(ProviderInvalidResponse, match="does not match its telemetry evidence window"):
+        DiagnosticService._validate_request_trends(DiagnosticRequest.model_validate(body))
 
 
 def test_timeout_is_bounded_and_returns_gateway_timeout(monkeypatch):

@@ -190,7 +190,11 @@ class DiagnosticService:
             }
             for field, value in expected.items():
                 actual = getattr(trend, field)
-                matches = math.isclose(actual, value, rel_tol=1e-9, abs_tol=1e-9) if isinstance(value, float) else actual == value
+                # The browser computes elapsed time with Date.parse millisecond
+                # precision while Python retains timestamp microseconds. Allow
+                # only that sub-millisecond representation difference.
+                tolerance = 1e-3 if field == "elapsed_seconds" else 1e-9
+                matches = math.isclose(actual, value, rel_tol=1e-9, abs_tol=tolerance) if isinstance(value, float) else actual == value
                 if not matches:
                     raise ProviderInvalidResponse("Diagnostic trend does not match its telemetry evidence window")
 

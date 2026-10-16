@@ -405,6 +405,27 @@ def test_chat_accepts_first_value_with_metric_word_between_role_and_number():
     )
 
 
+def test_chat_accepts_current_assessment_signal_values_and_previous_sample_in_distinct_roles():
+    context = {
+        "latest_telemetry": {"vibration_mm_s": 2.34, "rpm": 1784},
+        "recent_telemetry": [
+            {"vibration_mm_s": 2.09, "rpm": 1786},
+            {"vibration_mm_s": 2.34, "rpm": 1784},
+        ],
+        "current_rule_assessment": {"health_score": 100, "anomalies": []},
+        "recorded_trend_analysis": {"metrics": [
+            {"metric": "vibration_mm_s", "first_value": 2.09, "latest_value": 2.34,
+             "delta": 0.25, "threshold": {"high": 4.5}},
+            {"metric": "rpm", "latest_value": 1784, "threshold": {"low": 1650, "high": 1900}},
+        ]},
+    }
+    _validate_numeric_grounding(
+        "Vibration is 2.34 mm/s, up from 2.09 mm/s. Vibration threshold is 4.5 mm/s. "
+        "RPM at 1784 is within the 1650–1900 rpm range. Health score is 100.",
+        context,
+    )
+
+
 def test_chat_rejects_values_found_in_other_samples_but_not_the_trend_roles():
     with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
         _validate_numeric_grounding(
@@ -509,6 +530,8 @@ def test_amd_adapter_sends_grounding_feedback_as_system_instruction_and_revalida
 def test_amd_chat_prompt_forbids_unseen_numeric_estimates():
     assert "never estimate, interpolate" in _CHAT_SYSTEM_INSTRUCTIONS
     assert "omit it and state that the evidence is insufficient" in _CHAT_SYSTEM_INSTRUCTIONS
+    assert "current_rule_assessment.anomalies" in _CHAT_SYSTEM_INSTRUCTIONS
+    assert "sample or excursion counts" in _CHAT_SYSTEM_INSTRUCTIONS
 
 
 def test_amd_chat_rejects_empty_malformed_truncated_and_upstream_502_responses():

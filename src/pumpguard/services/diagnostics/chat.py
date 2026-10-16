@@ -69,6 +69,15 @@ def _numeric_facts(context: dict[str, object]) -> dict[tuple[str, str], set[floa
             if family:
                 add(family, "latest", value)
 
+    recent = context.get("recent_telemetry")
+    if isinstance(recent, list) and len(recent) >= 2 and isinstance(recent[-2], dict):
+        # The route supplies oldest-to-newest samples. Keep the immediately
+        # preceding reading distinct from the trend-window first value.
+        for key, value in recent[-2].items():
+            family = _metric_family(key)
+            if family:
+                add(family, "previous", value)
+
     # A small number of unit tests and internal callers pass a flat latest
     # snapshot. Treat only explicit metric keys as latest values.
     for key, value in context.items():
@@ -225,6 +234,8 @@ def _claim_role(text: str, match: re.Match[str], family: str | None) -> str:
         (r"\b(?:elapsed|duration)\b", "duration"),
         (r"\b(?:ended|finished|reached)\s+at\b", "latest"),
         (r"\b(?:latest|current|most\s+recent)\b", "latest"),
+        (r"\b(?:up|down)\s+from\b", "previous"),
+        (r"\b(?:previous|preceding|prior)\s+(?:reading|sample|value)\b", "previous"),
         (r"\bchange\s+(?:over|across|during)\s+(?:the\s+)?(?:window|period|interval)\b", "delta"),
         (r"\bchange\s*:\s*", "delta"),
         (r"\bchange\s+(?=[+-]?(?:\d|\.\d))", "delta"),
@@ -237,10 +248,12 @@ def _claim_role(text: str, match: re.Match[str], family: str | None) -> str:
             absolute_start, absolute_end = window_start + marker.start(), window_start + marker.end()
             if role == "delta" and absolute_start >= end:
                 continue
-            if role == "threshold" and pattern.startswith(r"\b(?:below|under|above)") and absolute_start >= end:
+            if role == "previous" and absolute_start >= end:
+                continue
+            if role == "threshold" and (pattern.startswith(r"\b(?:below|under|above)") or pattern == r"\bwithin\b") and absolute_start >= end:
                 continue
             distance = absolute_start - end if absolute_start >= end else start - absolute_end
-            max_distance = (8 if role == "samples" else 2 if role == "score" else
+            max_distance = (8 if role == "samples" else 12 if role == "score" else
                             24 if role in {"threshold", "critical_threshold"} else
                             32 if role == "first" else 18)
             if distance <= max_distance:
