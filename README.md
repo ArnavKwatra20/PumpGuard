@@ -259,6 +259,8 @@ Live production deployments (Hobby plan; both projects are connected to this rep
 - API: https://pumpguard-steel.vercel.app (project `pumpguard`; the shorter `pumpguard.vercel.app` alias was already taken globally, so Vercel auto-aliased)
 - Web: https://pumpguard-web.vercel.app (project `pumpguard-web`)
 
+The production web project uses Root Directory `apps/web`, install command `npm ci`, build command `npm run build`, and output directory `dist`. Its previous root-level build configuration attempted to run `vite build` without installing the frontend package and failed with `vite: command not found`; these project settings have been corrected.
+
 Both projects were created non-interactively with the Vercel CLI (`vercel link --yes --project …`, `vercel env add …`, `vercel deploy --prod`); the dashboard steps below are the equivalent manual flow.
 
 This repository deploys to Vercel as a Vite frontend and a FastAPI backend. The backend project is `pumpguard` (`https://pumpguard-steel.vercel.app`); the separate `pumpguard-api` project is a failed duplicate and is not used by the frontend. The backend entry point is the root `app.py`, an ASGI module that exports `app` from the FastAPI factory after adding `src/` to `sys.path`. Vercel's FastAPI framework detection supports this entry point. The root `vercel.json` deliberately has no `functions` glob: those patterns match functions under `/api`, and pointing one at root `app.py` caused the `unused_function` build failure. Local development is unchanged (`uvicorn apps.api.main:app`).
