@@ -329,6 +329,8 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
   const submit = async (event?: FormEvent, nextScenario = scenario, force = false) => {
     event?.preventDefault();
     if (pending || (inFlight.current && !force)) return;
+    liveClientSessionIdRef.current = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID() : `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     diagnosticRequestVersionRef.current += 1;
     setDiagnosticLoading(false);
     setDiagnosticError(null);
@@ -339,6 +341,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
       const requestStartedAt = Date.now();
       const response = validateSimulationResponse(await api.generate({
         pump_id: pumpId.trim(),
+        client_session_id: liveClientSessionIdRef.current ?? undefined,
         scenario: nextScenario,
         sample_count: sampleCount,
         sampling_interval_seconds: intervalSeconds,
@@ -466,7 +469,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
     const samples = [...readings].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp)).slice(-12);
     if (!samples.length) samples.push(telemetry);
     const trends = (Object.keys(MEASUREMENTS) as MetricKey[]).flatMap((metric) => {
-      const trend = calculateMetricTrend(readings, metric);
+      const trend = calculateMetricTrend(samples, metric);
       return trend ? [{ metric, initial_value: trend.initialValue, latest_value: trend.latestValue, delta: trend.delta,
         elapsed_seconds: trend.elapsedSeconds, samples: trend.samples }] : [];
     });
@@ -648,7 +651,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
             </button>)}
           </div>
           <section className="diagnostic-panel panel" id="diagnostic-inspector" data-layout-slot="inspector" aria-label="Diagnostic inspector">
-            <DiagnosticExplorer assessment={assessment} telemetry={telemetry} readings={readings} scenario={returnedScenario ?? scenario} freshness={diagnosticFreshness} selectedMetric={selectedMetric} selectedAlert={selectedAlert} onSelectMetric={(metric) => { setSelectedMetric(metric); const matching = [...alerts].reverse().find((item) => item.metric === metric && item.state !== 'resolved'); setSelectedAlertId(matching?.id ?? null); }} diagnosis={visibleDiagnosis} diagnosisLoading={diagnosticLoading} diagnosisError={diagnosticError} providerStatus={providerStatus} diagnosticAvailable={Boolean(api.diagnose)} onRequestDiagnosis={() => void requestDiagnosis()} api={api} pumpId={telemetry?.pump_id ?? pumpId} />
+            <DiagnosticExplorer assessment={assessment} telemetry={telemetry} readings={readings} scenario={returnedScenario ?? scenario} freshness={diagnosticFreshness} selectedMetric={selectedMetric} selectedAlert={selectedAlert} onSelectMetric={(metric) => { setSelectedMetric(metric); const matching = [...alerts].reverse().find((item) => item.metric === metric && item.state !== 'resolved'); setSelectedAlertId(matching?.id ?? null); }} diagnosis={visibleDiagnosis} diagnosisLoading={diagnosticLoading} diagnosisError={diagnosticError} providerStatus={providerStatus} diagnosticAvailable={Boolean(api.diagnose)} onRequestDiagnosis={() => void requestDiagnosis()} api={api} pumpId={telemetry?.pump_id ?? pumpId} clientSessionId={liveClientSessionIdRef.current ?? undefined} />
           </section>
           <TelemetryAnalysisPanel analysis={telemetryAnalysis} loading={telemetryAnalysisLoading} error={telemetryAnalysisError} onAnalyze={() => void requestTelemetryAnalysis()} available={Boolean(api.telemetryAnalysis) && Boolean(telemetry)} />
           <AiFeaturePanel api={api} pumpId={telemetry?.pump_id ?? pumpId} clientSessionId={liveClientSessionIdRef.current} contextAvailable={Boolean(telemetry && assessment)} contextKey={`${telemetry?.pump_id ?? pumpId}:${returnedScenario ?? scenario}`} />

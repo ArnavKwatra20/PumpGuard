@@ -24,7 +24,8 @@ def _provider_failure_detail(exc: Exception) -> str:
 async def diagnostic_chat(payload: DiagnosticChatRequest, request: Request) -> DiagnosticChatResponse:
     """Build authoritative context from backend state; browser context is never trusted."""
     try:
-        readings = request.app.state.telemetry.history(payload.pump_id, limit=12)
+        readings = request.app.state.telemetry.history(payload.pump_id, limit=12,
+                                                       client_session_id=payload.client_session_id)
         latest = readings[0]
     except (UnknownPumpError, IndexError) as exc:
         raise HTTPException(status_code=404, detail=f"Unknown pump_id: {payload.pump_id}") from exc

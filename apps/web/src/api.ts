@@ -75,7 +75,7 @@ export interface DiagnosticResult {
 
 export interface DiagnosticProviderStatus { provider: 'mock' | 'amd' | 'amd_unavailable'; state?: 'mock_test_mode' | 'amd_configured' | 'amd_unconfigured'; available: boolean; is_mock: boolean; configured?: boolean; model?: string | null }
 export interface DiagnosticChatMessage { role: 'user' | 'assistant'; content: string; timestamp?: string }
-export interface DiagnosticChatRequest { pump_id: string; question: string; history: Pick<DiagnosticChatMessage, 'role' | 'content'>[] }
+export interface DiagnosticChatRequest { pump_id: string; client_session_id?: string; question: string; history: Pick<DiagnosticChatMessage, 'role' | 'content'>[] }
 export interface DiagnosticChatResponse { assistant_message: string; provider: 'mock' | 'amd' | 'amd_unavailable'; is_mock: boolean; latency_ms: number }
 export type AiFeatureKind = 'maintenance_planner' | 'telemetry_explanation' | 'scenario_analyst';
 export interface AiFeatureRequest { pump_id: string; feature: AiFeatureKind; client_session_id?: string | null }
@@ -114,6 +114,7 @@ export interface ComparisonResult { asset_id: string; generator: 'deterministic_
 
 export interface SimulationRequest {
   pump_id: string;
+  client_session_id?: string;
   scenario: Scenario;
   sample_count: number;
   sampling_interval_seconds: number;

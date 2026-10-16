@@ -8,9 +8,9 @@ const defaultChat = vi.fn((_request: DiagnosticChatRequest): Promise<DiagnosticC
   provider: 'mock', is_mock: true, latency_ms: 4,
 }));
 
-function setup(diagnosticChat: NonNullable<PumpApi['diagnosticChat']> = defaultChat) {
+function setup(diagnosticChat: NonNullable<PumpApi['diagnosticChat']> = defaultChat, clientSessionId?: string) {
   const api = { diagnosticChat } as unknown as PumpApi;
-  return { api, ...render(<DiagnosticChat api={api} pumpId="pump-01" contextAvailable />) };
+  return { api, ...render(<DiagnosticChat api={api} pumpId="pump-01" clientSessionId={clientSessionId} contextAvailable />) };
 }
 
 describe('DiagnosticChat', () => {
@@ -34,6 +34,26 @@ describe('DiagnosticChat', () => {
     expect(screen.getByLabelText('Ask about this pump')).toBeDisabled();
     resolve({ assistant_message: 'The current evidence is synthetic.', provider: 'mock', is_mock: true, latency_ms: 1 });
     await screen.findByText(/current evidence is synthetic/);
+  });
+
+  it('sends the active client session with chat evidence requests', async () => {
+    const request = vi.fn().mockResolvedValue({ assistant_message: 'Scoped answer.', provider: 'amd', is_mock: false, latency_ms: 1 });
+    setup(request, 'session-current');
+    fireEvent.change(screen.getByLabelText('Ask about this pump'), { target: { value: 'What changed?' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByText('Scoped answer.');
+    expect(request).toHaveBeenCalledWith({ pump_id: 'pump-01', client_session_id: 'session-current', question: 'What changed?', history: [] });
+    expect(screen.getByText(/AMD-generated response/)).toBeInTheDocument();
+  });
+
+  it('never labels contradictory AMD mock provenance as an AMD response', async () => {
+    const request = vi.fn().mockResolvedValue({ assistant_message: 'Unverified answer.', provider: 'amd', is_mock: true, latency_ms: 1 });
+    setup(request);
+    fireEvent.change(screen.getByLabelText('Ask about this pump'), { target: { value: 'Summarize' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByText('Unverified answer.');
+    expect(screen.getByText(/TEST MOCK — not AMD-generated/)).toBeInTheDocument();
+    expect(screen.queryByText(/AMD-generated response/)).not.toBeInTheDocument();
   });
 
   it('shows an error and retries the failed question', async () => {
@@ -76,6 +96,7 @@ describe('DiagnosticChat', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', shiftKey: false });
     expect(await screen.findByRole('alert')).toHaveTextContent('Provider status unavailable');
     expect(request).toHaveBeenCalledWith({ pump_id: 'pump-01', question: 'Can you inspect this pump?', history: [] });
+    expect(screen.queryByText(/AMD-generated response/)).not.toBeInTheDocument();
   });
 
   it('keeps Enter as submit and Shift+Enter as newline while provider status is unavailable', async () => {

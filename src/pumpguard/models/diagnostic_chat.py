@@ -13,6 +13,8 @@ class DiagnosticChatMessage(BaseModel):
 class DiagnosticChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     pump_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    client_session_id: str | None = Field(default=None, min_length=1, max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     question: str = Field(min_length=1, max_length=2000)
     history: list[DiagnosticChatMessage] = Field(default_factory=list, max_length=8)
 

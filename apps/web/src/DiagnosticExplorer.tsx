@@ -21,6 +21,7 @@ interface Props {
   onRequestDiagnosis: () => void;
   api: PumpApi;
   pumpId: string | null;
+  clientSessionId?: string;
 }
 
 const METRIC_KEYS = Object.keys(MEASUREMENTS) as MetricKey[];
@@ -30,14 +31,15 @@ const time = (timestamp?: string) => timestamp && Number.isFinite(Date.parse(tim
 
 export function DiagnosticExplorer({ assessment, telemetry, readings, scenario, freshness, selectedMetric, selectedAlert, onSelectMetric,
   diagnosis, diagnosisLoading, diagnosisError, providerStatus, diagnosticAvailable, onRequestDiagnosis,
-  api, pumpId }: Props) {
+  api, pumpId, clientSessionId }: Props) {
   const primaryMetric = selectedAlert?.metric ?? selectedMetric ?? assessment?.anomalies[0]?.metric ?? null;
+  const evidenceWindow = [...readings].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp)).slice(-12);
   const primary = primaryMetric ? MEASUREMENTS[primaryMetric as MetricKey] : null;
   const currentAnomaly = primaryMetric ? anomalyForMetric(assessment, primaryMetric) : undefined;
   const historicalMatch = selectedAlert?.metric === primaryMetric ? selectedAlert : null;
   const related = relatedAnomalies(assessment, primaryMetric);
   const contributors = possibleContributors(assessment);
-  const trend = primaryMetric && primaryMetric in MEASUREMENTS ? calculateMetricTrend(readings, primaryMetric as MetricKey) : null;
+  const trend = primaryMetric && primaryMetric in MEASUREMENTS ? calculateMetricTrend(evidenceWindow, primaryMetric as MetricKey) : null;
   const suspectedRegions = currentAnomaly && assessment ? mapAnomalyComponents(currentAnomaly, assessment.detected_faults) : [];
 
   return <div className="diagnostic-explorer" aria-live="polite">
@@ -63,7 +65,7 @@ export function DiagnosticExplorer({ assessment, telemetry, readings, scenario, 
         <h5>Human inspection steps</h5><ul>{diagnosis.inspection_steps.map((step, index) => <li key={index}>{step}</li>)}</ul>
         <small>Human review required. This explanation cannot alter measured telemetry, detector outputs, alarms, or equipment controls.</small>
       </div>}
-      <DiagnosticChat api={api} pumpId={pumpId} contextAvailable={Boolean(telemetry && assessment)} />
+      <DiagnosticChat api={api} pumpId={pumpId} clientSessionId={clientSessionId} contextAvailable={Boolean(telemetry && assessment)} />
     </section>
     {primary ? <>
       <h3 className="explorer-title">{primary.label}{currentAnomaly && <span className={`severity-pill ${currentAnomaly.severity}`}>{currentAnomaly.severity}</span>}{historicalMatch && <span className={`state-pill ${historicalMatch.state}`}>{historicalMatch.state}</span>}</h3>
@@ -97,10 +99,10 @@ export function DiagnosticExplorer({ assessment, telemetry, readings, scenario, 
       </section>
 
       <section className="explorer-block">
-        <h4>Progression in recorded history</h4>
+        <h4>Progression in the latest diagnostic window</h4>
         {trend ? <p className="trend-summary">{primary.label}: <b>{value(trend.initialValue)} → {value(trend.latestValue)} {primary.unit}</b>, {trend.direction} by {value(Math.abs(trend.delta))} {primary.unit} across {trend.elapsedSeconds.toFixed(0)} s ({trend.samples} recorded samples). {time(trend.startTimestamp)} to {time(trend.endTimestamp)}.</p> : <p className="explorer-empty">No valid samples are available for this measurement.</p>}
         <details className="trend-details"><summary>Other measured changes in this window</summary><div className="trend-table">{METRIC_KEYS.map((metric) => {
-          const item = calculateMetricTrend(readings, metric);
+          const item = calculateMetricTrend(evidenceWindow, metric);
           return <div key={metric}><span>{MEASUREMENTS[metric].label}</span>{item ? <b>{item.direction} {item.delta > 0 ? '+' : ''}{value(item.delta)} {MEASUREMENTS[metric].unit}</b> : <b>Insufficient history</b>}</div>;
         })}</div><small>These are differences between recorded samples, not inferred causes. No measurement is synthesized to fill gaps.</small></details>
       </section>

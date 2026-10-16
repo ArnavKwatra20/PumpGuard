@@ -113,6 +113,7 @@ class DiagnosticService:
     async def _infer_and_cache(self, key: str, request: DiagnosticRequest, correlation_id: str) -> DiagnosticResult:
         started = time.perf_counter()
         try:
+            self._validate_request_trends(request)
             raw = await asyncio.wait_for(self._call_provider(request), timeout=self.timeout_seconds)
             wire_value = raw.model_dump() if isinstance(raw, BaseModel) else raw
             try:
@@ -165,6 +166,33 @@ class DiagnosticService:
                 current = self._inflight.get(key)
                 if current is asyncio.current_task():
                     self._inflight.pop(key, None)
+
+    @staticmethod
+    def _validate_request_trends(request: DiagnosticRequest) -> None:
+        """Require every supplied trend to describe this request's telemetry window."""
+        seen: set[str] = set()
+        for trend in request.trends:
+            if trend.metric in seen:
+                raise ProviderInvalidResponse("Diagnostic trend contains a duplicate metric")
+            seen.add(trend.metric)
+            points = [item for item in request.telemetry if getattr(item, trend.metric) is not None]
+            if not points:
+                raise ProviderInvalidResponse("Diagnostic trend has no matching telemetry evidence")
+            first, latest = points[0], points[-1]
+            first_value = getattr(first, trend.metric)
+            latest_value = getattr(latest, trend.metric)
+            expected = {
+                "initial_value": first_value,
+                "latest_value": latest_value,
+                "delta": latest_value - first_value,
+                "elapsed_seconds": max(0.0, (latest.timestamp - first.timestamp).total_seconds()),
+                "samples": len(points),
+            }
+            for field, value in expected.items():
+                actual = getattr(trend, field)
+                matches = math.isclose(actual, value, rel_tol=1e-9, abs_tol=1e-9) if isinstance(value, float) else actual == value
+                if not matches:
+                    raise ProviderInvalidResponse("Diagnostic trend does not match its telemetry evidence window")
 
     @staticmethod
     def _validate_grounding(content: DiagnosticContent, request: DiagnosticRequest) -> None:

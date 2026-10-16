@@ -5,6 +5,7 @@ import type { DiagnosticChatMessage, PumpApi } from './api';
 interface Props {
   api: PumpApi;
   pumpId: string | null;
+  clientSessionId?: string;
   contextAvailable: boolean;
 }
 
@@ -44,7 +45,7 @@ export function renderAssistantContent(content: string): ReactNode {
   });
 }
 
-export function DiagnosticChat({ api, pumpId, contextAvailable }: Props) {
+export function DiagnosticChat({ api, pumpId, clientSessionId, contextAvailable }: Props) {
   const [messages, setMessages] = useState<(DiagnosticChatMessage & { provider?: 'mock' | 'amd' | 'amd_unavailable'; is_mock?: boolean })[]>([]);
   const [question, setQuestion] = useState('');
   const [sending, setSending] = useState(false);
@@ -57,7 +58,7 @@ export function DiagnosticChat({ api, pumpId, contextAvailable }: Props) {
     setMessages([]);
     setQuestion('');
     setFailure(null);
-  }, [pumpId]);
+  }, [pumpId, clientSessionId]);
 
   const send = async (value = question.trim(), retry = false) => {
     if (!value || !pumpId || !api.diagnosticChat || sending || !chatAvailable || !contextAvailable) return;
@@ -68,7 +69,7 @@ export function DiagnosticChat({ api, pumpId, contextAvailable }: Props) {
     setFailure(null);
     setSending(true);
     try {
-      const result = await api.diagnosticChat({ pump_id: pumpId, question: value, history });
+      const result = await api.diagnosticChat({ pump_id: pumpId, ...(clientSessionId ? { client_session_id: clientSessionId } : {}), question: value, history });
       setMessages((current) => [...current, { role: 'assistant', content: result.assistant_message, timestamp: new Date().toISOString(), provider: result.provider, is_mock: result.is_mock }]);
     } catch (error) {
       setFailure({ question: value, message: error instanceof Error ? error.message : 'Diagnostic assistant request failed.' });

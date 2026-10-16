@@ -50,6 +50,23 @@ def test_provider_failure_modes_are_mapped_safely(mode, status):
     assert "credential" not in response.text.lower()
 
 
+def test_mismatched_trend_window_is_rejected_before_provider_call():
+    class RecordingProvider:
+        name = "amd"
+        calls = 0
+        async def diagnose(self, request):
+            self.calls += 1
+            return {}
+    provider = RecordingProvider()
+    body = request_body()
+    body["trends"] = [{"metric": "vibration_mm_s", "initial_value": 6.0, "latest_value": 7.5,
+                       "delta": 1.5, "elapsed_seconds": 1, "samples": 2}]
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        response = client.post("/api/v1/diagnostics", json=body)
+    assert response.status_code == 502
+    assert provider.calls == 0
+
+
 def test_timeout_is_bounded_and_returns_gateway_timeout(monkeypatch):
     monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS", "0.05")
     monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_MOCK_MODE", "timeout")
@@ -288,7 +305,7 @@ def test_amd_adapter_uses_verified_catalog_and_sends_only_bounded_evidence():
     client.close()
 
 
-def test_amd_schema_mismatch_is_rejected_without_coercion():
+def test_amd_schema_mismatch_is_rejected_without_coercion(caplog):
     import httpx
     import json
     from openai import OpenAI
@@ -313,10 +330,43 @@ def test_amd_schema_mismatch_is_rejected_without_coercion():
     client = OpenAI(base_url="https://amd.example/v1", api_key="unit-test-secret",
                     http_client=httpx.Client(transport=httpx.MockTransport(handler)))
     provider = AmdProvider("https://amd.example/v1", "DeepSeek-V4-Flash", "unit-test-secret", client=client)
+    caplog.set_level("INFO")
     with TestClient(create_app(diagnostic_provider=provider)) as api:
         response = api.post("/api/v1/diagnostics", json=request_body())
     assert response.status_code == 502
     assert response.json()["detail"] == "Diagnostic provider returned an invalid response"
+    assert "unit-test-secret" not in response.text
+    assert "stage=json_parse outcome=valid" in caplog.text
+    assert "stage=pydantic_validation outcome=invalid" in caplog.text
+    assert "unit-test-secret" not in caplog.text
+    client.close()
+
+
+@pytest.mark.parametrize(("content", "detail"), [
+    ('{"summary":', "AMD returned an invalid diagnostic response"),
+    ("", "AMD returned an empty diagnostic response"),
+    ("   \n", "AMD returned an empty diagnostic response"),
+    (None, "AMD diagnostic content must be a string"),
+    ('["not", "an", "object"]', "AMD diagnostic JSON must be an object"),
+])
+def test_amd_invalid_response_content_is_rejected_explicitly(content, detail):
+    import httpx
+    from openai import OpenAI
+    from pumpguard.services.diagnostics.providers import AmdProvider
+
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "DeepSeek-V4-Flash", "json_output": True}]})
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop",
+            "message": {"role": "assistant", "content": content}}]})
+
+    client = OpenAI(base_url="https://amd.example/v1", api_key="unit-test-secret",
+                    http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    provider = AmdProvider("https://amd.example/v1", "DeepSeek-V4-Flash", "unit-test-secret", client=client)
+    with TestClient(create_app(diagnostic_provider=provider)) as api:
+        response = api.post("/api/v1/diagnostics", json=request_body())
+    assert response.status_code == 502
+    assert response.json()["detail"] == detail
     assert "unit-test-secret" not in response.text
     client.close()
 
@@ -447,6 +497,28 @@ def test_amd_upstream_timeout_returns_504_without_sdk_retry(monkeypatch):
     assert len(chat_attempts) == 1
     assert response.status_code == 504
     assert "unit-test-secret" not in response.text
+
+
+def test_amd_upstream_error_returns_failure_without_mock_fallback():
+    import httpx
+    from openai import OpenAI
+    from pumpguard.services.diagnostics.providers import AmdProvider
+
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "DeepSeek-V4-Flash", "json_output": True}]})
+        return httpx.Response(503, json={"error": {"message": "provider unavailable"}})
+
+    client = OpenAI(base_url="https://amd.example/v1", api_key="unit-test-secret",
+                    http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    provider = AmdProvider("https://amd.example/v1", "DeepSeek-V4-Flash", "unit-test-secret", client=client)
+    with TestClient(create_app(diagnostic_provider=provider)) as api:
+        response = api.post("/api/v1/diagnostics", json=request_body())
+    assert response.status_code == 503
+    assert response.json()["detail"] == "AMD gateway is temporarily unavailable"
+    assert "mock" not in response.text.lower()
+    assert "unit-test-secret" not in response.text
+    client.close()
 
 
 def test_strip_code_fence_removes_markdown_wrapper():

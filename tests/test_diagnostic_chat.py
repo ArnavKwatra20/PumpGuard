@@ -1,11 +1,12 @@
 import json
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from openai import OpenAI
 
 from pumpguard.api.app import create_app
-from pumpguard.services.diagnostics.providers import AmdProvider, MockDiagnosticProvider, ProviderTimedOut, _CHAT_SYSTEM_INSTRUCTIONS
+from pumpguard.services.diagnostics.providers import AmdProvider, MockDiagnosticProvider, ProviderInvalidResponse, ProviderTimedOut, _CHAT_SYSTEM_INSTRUCTIONS
 from pumpguard.services.diagnostics.chat import _normalize_chat_content, _validate_numeric_grounding
 
 
@@ -44,6 +45,22 @@ def test_chat_builds_context_from_authoritative_backend_state_and_returns_respon
     assert provider.requests[0].question.startswith("Why is this pump")
     assert provider.contexts[0]["latest_telemetry"]["pump_id"] == "chat-pump"
     assert provider.contexts[0]["current_rule_assessment"]["health_score"] == generated["assessment"]["health_score"]
+
+
+def test_chat_reads_only_telemetry_from_the_current_client_session():
+    provider = RecordingChatProvider()
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        # A legacy simulation and another client's live samples must not leak into this session.
+        client.post("/api/v1/simulation/generate", json=seed_request())
+        client.post("/api/v1/simulation/live-sample", json={"pump_id": "chat-pump", "scenario": "bearing_wear", "client_session_id": "session-old", "random_seed": 1})
+        current = client.post("/api/v1/simulation/live-sample", json={"pump_id": "chat-pump", "scenario": "bearing_wear", "client_session_id": "session-current", "random_seed": 2}).json()
+        response = client.post("/api/v1/diagnostics/chat", json={
+            "pump_id": "chat-pump", "client_session_id": "session-current", "question": "What is the current reading?",
+        })
+    assert response.status_code == 200, response.text
+    context = provider.contexts[0]
+    assert context["sample_count"] == 1
+    assert context["latest_telemetry"]["timestamp"] == current["readings"][0]["timestamp"]
 
 
 def test_mock_chat_uses_backend_history_trend_analysis_for_historical_questions():
@@ -111,11 +128,11 @@ def test_chat_normalizes_escaped_bold_and_rejects_corrupted_unit_text():
     assert normalized.status_code == 200, normalized.text
     assert normalized.json()["assistant_message"] == "**warning** based on the current rule."
 
-    with TestClient(create_app(diagnostic_provider=RecordingChatProvider("The trend lasted 10 secondsasian."))) as client:
+    with TestClient(create_app(diagnostic_provider=RecordingChatProvider(r"Current \*\*warning\*\* based on the rule."))) as client:
         client.post("/api/v1/simulation/generate", json=seed_request())
         malformed = client.post("/api/v1/diagnostics/chat", json={"pump_id": "chat-pump", "question": "Summarize the status"})
     assert malformed.status_code == 200, malformed.text
-    assert malformed.json()["assistant_message"] == "The trend lasted 10 seconds asian."
+    assert malformed.json()["assistant_message"] == "Current **warning** based on the rule."
 
     with TestClient(create_app(diagnostic_provider=RecordingChatProvider("The thresholdaine bandsaine response is not readable."))) as client:
         client.post("/api/v1/simulation/generate", json=seed_request())
@@ -320,6 +337,63 @@ def test_chat_condition_change_question_accepts_grounded_trend_values_and_reject
     assert unsupported.status_code == 502, unsupported.text
     rejection = [record.getMessage() for record in caplog.records if "grounding rejected" in record.getMessage()]
     assert rejection and "token='37.5'" in rejection[-1]
+
+
+def _bearing_trend_context():
+    return {
+        "sample_count": 4,
+        "latest_telemetry": {"vibration_mm_s": 7.5},
+        # This old sample is present for the model's context but is not an endpoint
+        # of the trend window used for this answer.
+        "recent_telemetry": [{"vibration_mm_s": 1.91}, {"vibration_mm_s": 6.0},
+                             {"vibration_mm_s": 7.0}, {"vibration_mm_s": 7.5}],
+        "recorded_trend_analysis": {"sample_count": 3, "metrics": [{
+            "metric": "vibration_mm_s", "unit": "mm/s", "sample_count": 3,
+            "first_value": 6.0, "latest_value": 7.5, "delta": 1.5,
+            "minimum": 6.0, "maximum": 7.5, "mean": 6.8333333333,
+            "rate_per_second": 0.75, "direction": "increasing", "elapsed_seconds": 2.0,
+            "excursions_high": 3, "threshold": {"low": 0.0, "high": 4.5,
+                "critical_low": 0.0, "critical_high": 8.0, "unit": "mm/s"},
+        }]},
+    }
+
+
+def test_chat_rejects_reported_mismatch_for_authoritative_trend_window():
+    context = _bearing_trend_context()
+    with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
+        _validate_numeric_grounding(
+            "Vibration rose from 1.91 to 7.30 mm/s.", context,
+        )
+
+
+def test_chat_accepts_exact_first_and_latest_values_from_authoritative_trend():
+    _validate_numeric_grounding(
+        "Vibration increased from 6.0 to 7.5 mm/s, a change of 1.5 mm/s.",
+        _bearing_trend_context(),
+    )
+
+
+def test_chat_rejects_values_found_in_other_samples_but_not_the_trend_roles():
+    with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
+        _validate_numeric_grounding(
+            "Vibration began at 1.91 mm/s and reached 7.5 mm/s.",
+            _bearing_trend_context(),
+        )
+
+
+def test_chat_rejects_metric_family_and_unit_mismatch():
+    with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
+        _validate_numeric_grounding(
+            "Temperature increased from 6.0 to 7.5 mm/s.",
+            _bearing_trend_context(),
+        )
+
+
+def test_chat_rejects_values_with_wrong_statistical_role():
+    with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
+        _validate_numeric_grounding(
+            "The mean vibration was 7.5 mm/s.", _bearing_trend_context(),
+        )
 
 
 def test_chat_rejects_unsupported_measurements_thresholds_and_sample_counts():

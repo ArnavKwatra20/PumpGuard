@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PumpTwinApp } from './App';
-import type { DiagnosticResult, PumpApi, SimulationResponse } from './api';
+import type { DiagnosticRequest, DiagnosticResult, PumpApi, SimulationResponse } from './api';
 
 const audioMock = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), setErrorHandler: vi.fn(), activate: vi.fn(), close: vi.fn() }));
 vi.mock('./alarm-audio', () => ({ createAlarmAudio: () => audioMock }));
@@ -570,13 +570,64 @@ describe('digital twin dashboard', () => {
     setup({ generate: vi.fn().mockResolvedValue(atOffset(0)), history: vi.fn(), liveSample: vi.fn().mockRejectedValue(new Error('stop')), diagnose });
     selectScenario('bearing_wear');
     fireEvent.click(screen.getByRole('button', { name: /generate simulation/i }));
-    await screen.findByRole('button', { name: /acknowledge alarm/i });
-    fireEvent.click(screen.getByRole('button', { name: /request diagnostic explanation/i }));
+    await screen.findByText(/LIVE · fresh backend samples expected each second/);
+    const requestButton = await screen.findByRole('button', { name: /request diagnostic explanation/i });
+    await waitFor(() => expect(requestButton).toBeEnabled());
+    fireEvent.click(requestButton);
     expect(await screen.findByText(/MOCK RESULT · NOT AN AMD MODEL/)).toBeInTheDocument();
     expect(diagnose).toHaveBeenCalledWith(expect.objectContaining({
       is_synthetic: true, alert_episode_id: expect.any(String), telemetry: [expect.objectContaining({ vibration_mm_s: 7.1 })],
       detector: expect.objectContaining({ status: 'warning', confidence: null }),
     }));
+  });
+
+  it('labels a successfully parsed AMD diagnosis with its real provider provenance', async () => {
+    const diagnostic: DiagnosticResult = {
+      summary: 'AMD explanation based on this evidence.', hypotheses: [], missing_evidence: [], inspection_steps: ['Inspect safely.'],
+      priority: 'soon', priority_rationale: 'Rule warning.', limitations: ['Synthetic data.'], human_review_required: true,
+      provider: 'amd', is_mock: false, latency_ms: 3, correlation_id: 'amd-success', cached: false,
+      assessment_timestamp: new Date().toISOString(),
+    };
+    const diagnose = vi.fn().mockResolvedValue(diagnostic);
+    setup({ generate: vi.fn().mockResolvedValue(atOffset(0)), history: vi.fn(), liveSample: vi.fn().mockRejectedValue(new Error('stop')), diagnose });
+    selectScenario('bearing_wear');
+    fireEvent.click(screen.getByRole('button', { name: /generate simulation/i }));
+    await screen.findByText(/LIVE · fresh backend samples expected each second/);
+    const requestButton = await screen.findByRole('button', { name: /request diagnostic explanation/i });
+    await waitFor(() => expect(requestButton).toBeEnabled());
+    fireEvent.click(requestButton);
+    expect(await screen.findByText(/AMD · 3 ms/)).toBeInTheDocument();
+  });
+
+  it('derives diagnostic trends from the exact telemetry window sent to the provider', async () => {
+    const base = Date.now() - 12_000;
+    const readings = Array.from({ length: 13 }, (_, index) => ({
+      ...fixture.readings[0], timestamp: new Date(base + index * 1000).toISOString(),
+      vibration_mm_s: index === 0 ? 1.91 : 6 + (index - 1) * (1.5 / 11),
+    }));
+    readings[12].vibration_mm_s = 7.5;
+    const response = { ...fixture, readings, assessment: { ...fixture.assessment, timestamp: readings.at(-1)!.timestamp } };
+    const diagnostic: DiagnosticResult = {
+      summary: 'Evidence-based summary.', hypotheses: [], missing_evidence: [], inspection_steps: ['Inspect safely.'],
+      priority: 'soon', priority_rationale: 'Rule warning.', limitations: ['Synthetic data.'], human_review_required: true,
+      provider: 'mock', is_mock: true, latency_ms: 1, correlation_id: 'window-test', cached: false,
+      assessment_timestamp: fixtureTimestamp,
+    };
+    const diagnose = vi.fn().mockResolvedValue(diagnostic);
+    setup({ generate: vi.fn().mockResolvedValue(response), history: vi.fn(), liveSample: vi.fn().mockRejectedValue(new Error('stop')), diagnose });
+    selectScenario('bearing_wear');
+    fireEvent.click(screen.getByRole('button', { name: /generate simulation/i }));
+    await screen.findByText(/LIVE · fresh backend samples expected each second/);
+    const requestButton = await screen.findByRole('button', { name: /request diagnostic explanation/i });
+    await waitFor(() => expect(requestButton).toBeEnabled());
+    fireEvent.click(requestButton);
+    await waitFor(() => expect(diagnose).toHaveBeenCalledTimes(1));
+    const request = diagnose.mock.calls[0][0] as DiagnosticRequest;
+    const vibrationTrend = request.trends.find((item) => item.metric === 'vibration_mm_s');
+    expect(request.telemetry).toHaveLength(12);
+    expect(request.telemetry[0].vibration_mm_s).toBe(6);
+    expect(request.telemetry.at(-1)?.vibration_mm_s).toBe(7.5);
+    expect(vibrationTrend).toMatchObject({ initial_value: 6, latest_value: 7.5, delta: 1.5, samples: 12 });
   });
 
   it('keeps deterministic alert controls available when a diagnostic provider fails', async () => {

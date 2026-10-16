@@ -25,6 +25,7 @@ class SimulationRequest(BaseModel):
     sampling_interval_seconds:float=Field(default=1,ge=.1,le=86400)
     random_seed:int|None=None
     start_time:datetime|None=None
+    client_session_id:str|None=Field(default=None,min_length=1,max_length=64,pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 class LiveSampleRequest(BaseModel):
     """One new sample from the selected process-local live signal."""
@@ -68,7 +69,7 @@ def generate(payload: SimulationRequest, request: Request) -> SimulationResponse
     try: labeled=generator.generate_sequence(payload.scenario,payload.sample_count,payload.sampling_interval_seconds,payload.pump_id,payload.start_time)
     except ValueError as exc:raise HTTPException(422,detail=str(exc)) from exc
     readings=[r for r,_ in labeled]
-    request.app.state.telemetry.add_readings(readings)
+    request.app.state.telemetry.add_readings(readings, client_session_id=payload.client_session_id)
     return {"scenario_label":payload.scenario,"readings":readings,"assessment":assess_reading(readings[-1])}
 
 @router.post("/simulation/live-sample",response_model=SimulationResponse,summary="Generate one live synthetic sample")
@@ -81,6 +82,6 @@ def live_sample(payload: LiveSampleRequest, request: Request) -> SimulationRespo
             fault_severity=payload.fault_severity, fault_enabled=payload.fault_enabled)
     except ValueError as exc:
         raise HTTPException(status_code=422,detail=str(exc)) from exc
-    request.app.state.telemetry.add_readings([reading])
+    request.app.state.telemetry.add_readings([reading], client_session_id=payload.client_session_id)
     return {"scenario_label":payload.scenario,"readings":[reading],"assessment":assess_reading(reading),
             "simulation":request.app.state.live_simulation.snapshot(payload.pump_id,payload.client_session_id)}

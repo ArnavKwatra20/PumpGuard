@@ -35,7 +35,9 @@ _CHAT_SYSTEM_INSTRUCTIONS = (
     "percentage, or duration when that value is present in the authoritative context. Before responding, compare "
     "every numeric claim with the supplied context; never estimate, interpolate, round from an unseen value, or use "
     "a remembered setpoint/threshold. If an exact number is unavailable, omit it and state that the evidence is "
-    "insufficient."
+    "insufficient. For trend statements, use only the deterministic recorded trend analysis for the same metric and "
+    "window: first_value is the beginning, latest_value is the end, delta is the change, and mean/threshold values "
+    "have separate roles. Do not substitute values from individual recent samples for trend endpoints."
 )
 
 
@@ -251,22 +253,31 @@ class AmdProvider:
             response = await asyncio.to_thread(self._client.chat.completions.create, **request_options)
             choice = response.choices[0]
             text = choice.message.content
+            refusal = getattr(choice.message, "refusal", None)
             finish_reason = getattr(choice, "finish_reason", None)
-            logger.info("amd diagnostic stage=response status=200 elapsed_ms=%.1f finish_reason=%s content_empty=%s content_type=%s content_length=%s usage_present=%s",
-                        (monotonic() - started) * 1000, finish_reason, not bool(text), type(text).__name__,
+            logger.info("amd diagnostic stage=response status=200 elapsed_ms=%.1f finish_reason=%s refusal_present=%s content_empty=%s content_type=%s content_length=%s usage_present=%s",
+                        (monotonic() - started) * 1000, finish_reason, bool(refusal), not bool(text), type(text).__name__,
                         len(text) if isinstance(text, str) else 0, bool(getattr(response, "usage", None)))
+            if refusal:
+                raise ProviderInvalidResponse("AMD refused the diagnostic request")
             if finish_reason == "length":
                 raise ProviderInvalidResponse("AMD diagnostic response was truncated by the output limit")
             if finish_reason not in (None, "stop"):
                 raise ProviderInvalidResponse("AMD returned an unsupported finish reason")
-            if not text:
+            if not isinstance(text, str):
+                raise ProviderInvalidResponse("AMD diagnostic content must be a string")
+            if not text.strip():
                 raise ProviderInvalidResponse("AMD returned an empty diagnostic response")
             try:
                 parsed = json.loads(_strip_code_fence(text))
             except json.JSONDecodeError:
                 logger.warning("amd diagnostic stage=json_parse outcome=invalid")
                 raise
-            logger.info("amd diagnostic stage=json_parse outcome=valid value_type=%s", type(parsed).__name__)
+            if not isinstance(parsed, dict):
+                logger.warning("amd diagnostic stage=json_parse outcome=invalid value_type=%s", type(parsed).__name__)
+                raise ProviderInvalidResponse("AMD diagnostic JSON must be an object")
+            logger.info("amd diagnostic stage=json_parse outcome=valid value_type=%s keys=%s",
+                        type(parsed).__name__, sorted(str(key)[:64] for key in parsed.keys())[:32])
             return parsed
         except APITimeoutError as exc:
             logger.warning("amd diagnostic stage=response outcome=timeout elapsed_ms=%.1f", (monotonic() - started) * 1000)
