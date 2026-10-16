@@ -23,6 +23,7 @@ _GLUED_UNIT_PATTERN = re.compile(
 _KNOWN_CORRUPTED_TOKENS = re.compile(r"\b(?:thresholdaine|bandsaine|secondstons)\b", re.IGNORECASE)
 _HTML_TAG_PATTERN = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")
 _NUMBER_PATTERN = re.compile(r"(?<![A-Za-z])[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?![A-Za-z])")
+_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[,;!?]|\.(?=\s|$)")
 _TIMESTAMP_PATTERN = re.compile(
     r"(?:\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?\b"
     r"|\b\d{1,2}:\d{2}:\d{2}(?:\.\d+)?\b)"
@@ -201,8 +202,12 @@ def _claim_family(text: str, match: re.Match[str]) -> str | None:
 
 def _claim_role(text: str, match: re.Match[str], family: str | None) -> str:
     start, end = match.span()
-    window_start = max(0, start - 36)
-    window_end = min(len(text), end + 32)
+    previous_boundaries = list(_CLAUSE_BOUNDARY_PATTERN.finditer(text, 0, start))
+    next_boundary = _CLAUSE_BOUNDARY_PATTERN.search(text, end)
+    clause_start = previous_boundaries[-1].end() if previous_boundaries else 0
+    clause_end = next_boundary.start() if next_boundary else len(text)
+    window_start = max(clause_start, start - 36)
+    window_end = min(clause_end, end + 32)
     window = text[window_start:window_end].lower()
     roles = (
         (r"\bcritical\s+(?:threshold|limit|range)\b", "critical_threshold"),
@@ -218,8 +223,11 @@ def _claim_role(text: str, match: re.Match[str], family: str | None) -> str:
         (r"\b(?:maximum|max|peak|highest)\b", "maximum"),
         (r"\b(?:rate|slope|per\s+second)\b", "rate"),
         (r"\b(?:elapsed|duration)\b", "duration"),
+        (r"\b(?:ended|finished|reached)\s+at\b", "latest"),
+        (r"\b(?:latest|current|most\s+recent)\b", "latest"),
         (r"\bchange\s+(?:over|across|during)\s+(?:the\s+)?(?:window|period|interval)\b", "delta"),
         (r"\bchange\s*:\s*", "delta"),
+        (r"\bchange\s+(?=[+-]?(?:\d|\.\d))", "delta"),
         (r"\b(?:increased|decreased|changed|rose|dropped|fell|delta|change)\s+(?:by|of)\b", "delta"),
         (r"\b(?:initial|first|starting|began|started)\b", "first"),
     )

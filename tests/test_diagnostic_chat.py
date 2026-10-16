@@ -400,7 +400,7 @@ def test_chat_accepts_first_value_with_metric_word_between_role_and_number():
     metric = context["recorded_trend_analysis"]["metrics"][0]
     metric.update(first_value=5.96, latest_value=6.96, delta=1.0)
     _validate_numeric_grounding(
-        "First vibration reading was 5.96 mm/s, latest was 6.96 mm/s. Change: +1.00 mm/s.",
+        "First vibration reading was 5.96 mm/s, latest 6.96 mm/s, change +1.00 mm/s over the window.",
         context,
     )
 
