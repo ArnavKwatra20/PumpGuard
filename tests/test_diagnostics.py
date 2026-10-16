@@ -322,12 +322,34 @@ def test_amd_adapter_uses_verified_catalog_and_sends_only_bounded_evidence():
     assert result.json()["provider"] == "amd"
     assert "pump_id" not in sent[0]["messages"][1]["content"]
     assert "selected_scenario" not in sent[0]["messages"][1]["content"]
+    sent_evidence = json.loads(sent[0]["messages"][1]["content"])
+    assert sent_evidence["events"] == [{"time_seconds": 1.0, "kind": "fault_injected"}]
+    assert "scenario" not in sent_evidence["events"][0]
     assert sent[0]["max_tokens"] == 700
     assert sent[0]["response_format"] == {"type": "json_object"}
     contract = sent[0]["messages"][0]["content"]
     assert '"priority": exactly one of the JSON strings "routine", "soon", or "urgent"' in contract
     assert 'Never use shortened names such as "vibration", "temperature", or "pressure"' in contract
     client.close()
+
+
+def test_diagnostic_evidence_value_is_required_by_schema():
+    body = {
+        "source": "telemetry", "field": "vibration_mm_s", "metric": "vibration_mm_s",
+        "reading_index": 0,
+    }
+    from pumpguard.models.diagnostic import DiagnosticEvidenceReference
+    with pytest.raises(ValidationError):
+        DiagnosticEvidenceReference.model_validate(body)
+
+
+def test_load_percent_is_a_supported_telemetry_evidence_metric():
+    from pumpguard.models.diagnostic import DiagnosticEvidenceReference
+    reference = DiagnosticEvidenceReference.model_validate({
+        "source": "telemetry", "field": "load_percent", "metric": "load_percent",
+        "reading_index": 0, "value": 65,
+    })
+    assert reference.metric == "load_percent"
 
 
 def test_amd_schema_mismatch_is_rejected_without_coercion(caplog):

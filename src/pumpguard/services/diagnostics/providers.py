@@ -57,9 +57,10 @@ _DIAGNOSTIC_OUTPUT_CONTRACT = (
     '- Every evidence object must contain "source", "field", and "value". Allowed source values are exactly: '
     '"telemetry", "trend", "detector", "alert", "event", "ml_prediction", or "assessment". '
     'For source "telemetry" or "trend", "metric" is required and must be exactly one of: '
-    '"temperature_c", "vibration_mm_s", "sound_db", "rpm", or "pressure_kpa". '
+    '"temperature_c", "vibration_mm_s", "sound_db", "rpm", "pressure_kpa", or "load_percent". '
     'Never use shortened names such as "vibration", "temperature", or "pressure". '
     'For every other source, omit "metric". Use "reading_index" only for telemetry and "event_index" only for event. '
+    'For source "event", cite only the supplied "time_seconds" or "kind" fields; event scenario labels are not supplied. '
     'Copy the evidence value exactly from the supplied context.\n'
     '- "missing_evidence": an array of strings\n'
     '- "inspection_steps": an array of 1 to 2 concise strings\n'
@@ -236,6 +237,9 @@ class AmdProvider:
             "assessment": request.assessment.model_dump() if request.assessment else None,
             "alert": request.alert.model_dump() if request.alert else None,
             "ml_prediction": request.ml_prediction.model_dump() if request.ml_prediction else None,
+            # The schema allows time/kind evidence for events. Exclude scenario labels,
+            # which are simulator metadata and are not needed for a diagnostic.
+            "events": [{"time_seconds": event.time_seconds, "kind": event.kind} for event in request.events],
         }
         messages = [
             {"role": "system", "content": DIAGNOSTIC_INSTRUCTIONS + "\n\n" + _DIAGNOSTIC_OUTPUT_CONTRACT},

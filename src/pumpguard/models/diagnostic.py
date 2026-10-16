@@ -126,10 +126,10 @@ class DiagnosticEvidenceReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: Literal["telemetry", "trend", "detector", "alert", "event", "ml_prediction", "assessment"]
     field: str = Field(min_length=1, max_length=64)
-    metric: Literal["temperature_c", "vibration_mm_s", "sound_db", "rpm", "pressure_kpa"] | None = None
+    metric: Literal["temperature_c", "vibration_mm_s", "sound_db", "rpm", "pressure_kpa", "load_percent"] | None = None
     reading_index: int | None = Field(default=None, ge=0, le=11)
     event_index: int | None = Field(default=None, ge=0, le=15)
-    value: float | str | None = None
+    value: float | str
 
 
 class DiagnosticHypothesis(BaseModel):
