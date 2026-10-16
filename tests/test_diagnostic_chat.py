@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from openai import OpenAI
 
 from pumpguard.api.app import create_app
-from pumpguard.services.diagnostics.providers import AmdProvider, ProviderTimedOut, _CHAT_SYSTEM_INSTRUCTIONS
+from pumpguard.services.diagnostics.providers import AmdProvider, MockDiagnosticProvider, ProviderTimedOut, _CHAT_SYSTEM_INSTRUCTIONS
 from pumpguard.services.diagnostics.chat import _normalize_chat_content, _validate_numeric_grounding
 
 
@@ -44,6 +44,23 @@ def test_chat_builds_context_from_authoritative_backend_state_and_returns_respon
     assert provider.requests[0].question.startswith("Why is this pump")
     assert provider.contexts[0]["latest_telemetry"]["pump_id"] == "chat-pump"
     assert provider.contexts[0]["current_rule_assessment"]["health_score"] == generated["assessment"]["health_score"]
+
+
+def test_mock_chat_uses_backend_history_trend_analysis_for_historical_questions():
+    with TestClient(create_app(diagnostic_provider=MockDiagnosticProvider())) as client:
+        client.post("/api/v1/simulation/generate", json=seed_request())
+        analysis = client.get("/api/v1/pumps/chat-pump/telemetry/analysis?limit=12").json()
+        response = client.post("/api/v1/diagnostics/chat", json={
+            "pump_id": "chat-pump",
+            "question": "How have temperature and vibration changed across recent samples?",
+        })
+
+    assert response.status_code == 200, response.text
+    message = response.json()["assistant_message"]
+    assert "backend's recent synthetic telemetry history" in message
+    for metric in analysis["metrics"][:6]:
+        assert f"{metric['metric']} {metric['direction']}" in message
+    assert "not an AMD-generated diagnosis" in message
 
 
 def test_chat_rejects_browser_supplied_telemetry_and_unknown_pump():

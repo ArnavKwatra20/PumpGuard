@@ -170,7 +170,24 @@ class MockDiagnosticProvider:
             return ""
         assessment = context.get("current_rule_assessment", {})
         status = assessment.get("status", "unknown") if isinstance(assessment, dict) else "unknown"
+        analysis = context.get("recorded_trend_analysis", {})
+        metrics = analysis.get("metrics", []) if isinstance(analysis, dict) else []
+        trends = [
+            f"{item['metric']} {item['direction']}"
+            for item in metrics
+            if isinstance(item, dict)
+            and isinstance(item.get("metric"), str)
+            and item.get("direction") in {"increasing", "decreasing", "stable", "insufficient_data"}
+        ][:6]
+        history = "; ".join(trends) if trends else "historical trend analysis unavailable"
+        sample_count = context.get("sample_count", 0)
+        history_note = (
+            "the backend's recent synthetic telemetry history"
+            if isinstance(sample_count, int) and sample_count > 1
+            else "the available synthetic telemetry history"
+        )
         return (f"Offline mock assistant: the backend rule assessment for {request.pump_id} is {status}. "
+                f"From {history_note}, recorded metric trends are: {history}. "
                 "This is a synthetic-context response, not an AMD-generated diagnosis.")
 
 
