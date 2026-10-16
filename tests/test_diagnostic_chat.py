@@ -395,6 +395,16 @@ def test_chat_accepts_delta_label_without_confusing_latest_value_or_threshold():
     )
 
 
+def test_chat_accepts_first_value_with_metric_word_between_role_and_number():
+    context = _bearing_trend_context()
+    metric = context["recorded_trend_analysis"]["metrics"][0]
+    metric.update(first_value=5.96, latest_value=6.96, delta=1.0)
+    _validate_numeric_grounding(
+        "First vibration reading was 5.96 mm/s, latest was 6.96 mm/s. Change: +1.00 mm/s.",
+        context,
+    )
+
+
 def test_chat_rejects_values_found_in_other_samples_but_not_the_trend_roles():
     with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
         _validate_numeric_grounding(

@@ -232,7 +232,9 @@ def _claim_role(text: str, match: re.Match[str], family: str | None) -> str:
             if role == "threshold" and pattern.startswith(r"\b(?:below|under|above)") and absolute_start >= end:
                 continue
             distance = absolute_start - end if absolute_start >= end else start - absolute_end
-            max_distance = 8 if role == "samples" else 2 if role == "score" else 24 if role in {"threshold", "critical_threshold"} else 18
+            max_distance = (8 if role == "samples" else 2 if role == "score" else
+                            24 if role in {"threshold", "critical_threshold"} else
+                            32 if role == "first" else 18)
             if distance <= max_distance:
                 candidates.append((max(0, distance), role))
     if re.search(r"\bnumber\s+of\s+samples?\s*$", text[max(0, start - 24):start], re.I):
