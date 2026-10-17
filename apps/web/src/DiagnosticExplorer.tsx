@@ -32,7 +32,8 @@ const time = (timestamp?: string) => timestamp && Number.isFinite(Date.parse(tim
 export function DiagnosticExplorer({ assessment, telemetry, readings, scenario, freshness, selectedMetric, selectedAlert, onSelectMetric,
   diagnosis, diagnosisLoading, diagnosisError, providerStatus, diagnosticAvailable, onRequestDiagnosis,
   api, pumpId, clientSessionId }: Props) {
-  const primaryMetric = selectedAlert?.metric ?? selectedMetric ?? assessment?.anomalies[0]?.metric ?? null;
+  const validSelectedMetric = selectedMetric && selectedMetric in MEASUREMENTS ? selectedMetric : null;
+  const primaryMetric = selectedAlert?.metric ?? validSelectedMetric ?? assessment?.anomalies[0]?.metric ?? 'vibration_mm_s';
   const evidenceWindow = [...readings].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp)).slice(-12);
   const primary = primaryMetric ? MEASUREMENTS[primaryMetric as MetricKey] : null;
   const currentAnomaly = primaryMetric ? anomalyForMetric(assessment, primaryMetric) : undefined;
