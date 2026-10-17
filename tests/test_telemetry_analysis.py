@@ -160,3 +160,30 @@ def test_endpoint_rejects_limit_below_two():
         response = client.get("/api/v1/pumps/pump-01/telemetry/analysis", params={"limit": 1})
     assert response.status_code == 422
 
+
+def test_analysis_and_compare_are_scoped_to_requested_client_session():
+    with TestClient(create_app()) as client:
+        for session, seed in (("browser-a", 11), ("browser-b", 27)):
+            generated = client.post("/api/v1/simulation/generate", json={
+                "pump_id": "shared-pump", "scenario": "bearing_wear", "random_seed": seed,
+                "sample_count": 8, "client_session_id": session,
+            })
+            assert generated.status_code == 200
+        analysis_a = client.get("/api/v1/pumps/shared-pump/telemetry/analysis",
+                                params={"limit": 8, "client_session_id": "browser-a"})
+        analysis_b = client.get("/api/v1/pumps/shared-pump/telemetry/analysis",
+                                params={"limit": 8, "client_session_id": "browser-b"})
+        compare = client.get("/api/v1/pumps/shared-pump/telemetry/analysis/compare",
+                             params={"current": 3, "baseline": 3, "client_session_id": "browser-b"})
+    assert analysis_a.status_code == analysis_b.status_code == compare.status_code == 200
+    assert analysis_a.json()["sample_count"] == analysis_b.json()["sample_count"] == 8
+    assert analysis_a.json()["metrics"] != analysis_b.json()["metrics"]
+    assert compare.json()["baseline_sample_count"] == compare.json()["current_sample_count"] == 3
+
+
+def test_analysis_rejects_malformed_client_session_id():
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/pumps/p1/telemetry/analysis",
+                              params={"client_session_id": "bad session!"})
+    assert response.status_code == 422
+

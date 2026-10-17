@@ -146,8 +146,8 @@ export interface PumpApi {
   diagnosticStatus?(): Promise<DiagnosticProviderStatus>;
   diagnosticModels?(): Promise<DiagnosticModelCatalog>;
   mlStatus?(): Promise<MLComputeStatus>;
-  telemetryAnalysis?(pumpId: string, limit?: number): Promise<TelemetryAnalysis>;
-  telemetryCompare?(pumpId: string, current?: number, baseline?: number): Promise<ComparisonResult>;
+  telemetryAnalysis?(pumpId: string, limit?: number, clientSessionId?: string): Promise<TelemetryAnalysis>;
+  telemetryCompare?(pumpId: string, current?: number, baseline?: number, clientSessionId?: string): Promise<ComparisonResult>;
 }
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? '';
@@ -240,15 +240,17 @@ export const pumpApi: PumpApi = {
     );
     return readJson<Telemetry[]>(response);
   },
-  async telemetryAnalysis(pumpId, limit = 120) {
+  async telemetryAnalysis(pumpId, limit = 120, clientSessionId) {
+    const session = clientSessionId ? `&client_session_id=${encodeURIComponent(clientSessionId)}` : '';
     const response = await fetchWithTimeout(
-      `${apiBase}/api/v1/pumps/${encodeURIComponent(pumpId)}/telemetry/analysis?limit=${limit}`,
+      `${apiBase}/api/v1/pumps/${encodeURIComponent(pumpId)}/telemetry/analysis?limit=${limit}${session}`,
     );
     return readJson<TelemetryAnalysis>(response);
   },
-  async telemetryCompare(pumpId, current = 30, baseline = 30) {
+  async telemetryCompare(pumpId, current = 30, baseline = 30, clientSessionId) {
+    const session = clientSessionId ? `&client_session_id=${encodeURIComponent(clientSessionId)}` : '';
     const response = await fetchWithTimeout(
-      `${apiBase}/api/v1/pumps/${encodeURIComponent(pumpId)}/telemetry/analysis/compare?current=${current}&baseline=${baseline}`,
+      `${apiBase}/api/v1/pumps/${encodeURIComponent(pumpId)}/telemetry/analysis/compare?current=${current}&baseline=${baseline}${session}`,
     );
     return readJson<ComparisonResult>(response);
   },

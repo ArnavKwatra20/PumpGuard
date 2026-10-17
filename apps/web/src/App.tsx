@@ -515,7 +515,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
     try {
       // The backend requires limit >= 2; request a bounded window of the recent history.
       const limit = Math.min(Math.max(readings.length, 2), 200);
-      const result = await api.telemetryAnalysis(telemetry?.pump_id ?? pumpId, limit);
+      const result = await api.telemetryAnalysis(telemetry?.pump_id ?? pumpId, limit, liveClientSessionIdRef.current ?? undefined);
       setTelemetryAnalysis(result);
       recordSessionEvent('Telemetry intelligence analysis refreshed', 'info');
     } catch (reason) {
