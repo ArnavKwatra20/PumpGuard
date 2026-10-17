@@ -13,7 +13,7 @@ from pumpguard.api.routes.ml import router as ml_router
 from pumpguard.config import get_settings
 from pumpguard.services.telemetry_service import TelemetryService
 from pumpguard.simulator.live import LiveSimulationService
-from pumpguard.services.diagnostics.providers import AmdProvider, DiagnosticProvider, MockDiagnosticProvider
+from pumpguard.services.diagnostics.providers import AmdProvider, DiagnosticProvider
 from pumpguard.services.diagnostics.service import DiagnosticService
 from pumpguard.services.diagnostics.chat import DiagnosticChatService
 from pumpguard.services.ml_inference import MLInferenceService
@@ -28,24 +28,23 @@ def create_app(service: TelemetryService | None = None, *, diagnostic_provider: 
         allow_credentials=False, allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Content-Type"])
     app.add_middleware(DemoRateLimitMiddleware, window_seconds=settings.rate_limit_window_seconds,
-        diagnostics=settings.rate_limit_diagnostics, simulation=settings.rate_limit_simulation,
-        analysis=settings.rate_limit_analysis, ml=settings.rate_limit_ml)
+        simulation=settings.rate_limit_simulation, analysis=settings.rate_limit_analysis,
+        ml=settings.rate_limit_ml)
     app.state.telemetry=service or TelemetryService(settings.history_limit)
     app.state.live_simulation=LiveSimulationService()
     app.state.ml_inference=MLInferenceService()
     app.state.relationships=RelationshipService()
     app.state.telemetry_analysis=TelemetryAnalysisService()
-    provider=diagnostic_provider or (MockDiagnosticProvider(settings.diagnostic_mock_mode)
-        if settings.diagnostic_provider=="mock" else AmdProvider(
-            settings.radeon_base_url, settings.radeon_model, settings.radeon_api_key,
-            connect_timeout_seconds=settings.diagnostic_connect_timeout_seconds,
-            response_timeout_seconds=max(
-                0.01,
-                settings.diagnostic_timeout_seconds
-                - min(5.0, settings.diagnostic_timeout_seconds * 0.2),
-            ),
-            max_output_tokens=settings.diagnostic_max_output_tokens,
-        ))
+    provider=diagnostic_provider or AmdProvider(
+        settings.radeon_base_url, settings.radeon_model, settings.radeon_api_key,
+        connect_timeout_seconds=settings.diagnostic_connect_timeout_seconds,
+        response_timeout_seconds=max(
+            0.01,
+            settings.diagnostic_timeout_seconds
+            - min(5.0, settings.diagnostic_timeout_seconds * 0.2),
+        ),
+        max_output_tokens=settings.diagnostic_max_output_tokens,
+    )
     app.state.diagnostic_service=DiagnosticService(provider,settings.diagnostic_timeout_seconds)
     app.state.diagnostic_chat_service=DiagnosticChatService(provider,settings.diagnostic_timeout_seconds)
     logging.basicConfig(level=settings.log_level)

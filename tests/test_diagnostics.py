@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from pumpguard.api.app import create_app
-from pumpguard.models.diagnostic import DiagnosticRequest
+from pumpguard.models.diagnostic import DiagnosticContent, DiagnosticRequest
 from pumpguard.services.diagnostics.providers import MockDiagnosticProvider, ProviderInvalidResponse, ProviderRateLimited
 from pumpguard.services.diagnostics.service import DiagnosticService
 
@@ -24,6 +24,12 @@ def request_body():
                   "observed_value": 7.1, "expected_range": "0–4.5 mm/s", "explanation": "High vibration"},
         "events": [{"time_seconds": 1, "kind": "fault_injected", "scenario": "bearing_wear"}],
     }
+
+
+def diagnostic_reading(reading):
+    return {field: reading[field] for field in (
+        "timestamp", "temperature_c", "vibration_mm_s", "sound_db", "rpm", "pressure_kpa", "load_percent",
+    )}
 
 
 def test_mock_provider_returns_valid_explicitly_labeled_diagnostic():
@@ -67,6 +73,130 @@ def test_mismatched_trend_window_is_rejected_before_provider_call():
     assert provider.calls == 0
 
 
+def test_backend_derives_provider_trends_from_the_exact_submitted_telemetry_window():
+    class TrendRecordingProvider:
+        name = "mock"
+        trends = None
+
+        async def diagnose(self, request):
+            self.trends = request.trends
+            return await MockDiagnosticProvider().diagnose(request)
+
+    provider = TrendRecordingProvider()
+    body = request_body()
+    body["telemetry"] = [
+        {**body["telemetry"][0], "timestamp": "2026-10-17T00:00:00Z", "vibration_mm_s": 6.0},
+        {**body["telemetry"][0], "timestamp": "2026-10-17T00:00:13Z", "vibration_mm_s": 7.5},
+    ]
+    body["trends"] = []
+    body["assessment_timestamp"] = "2026-10-17T00:00:13Z"
+
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        response = client.post("/api/v1/diagnostics", json=body)
+
+    assert response.status_code == 200, response.text
+    vibration = next(item for item in provider.trends if item.metric == "vibration_mm_s")
+    assert (vibration.initial_value, vibration.latest_value, vibration.delta) == (6.0, 7.5, 1.5)
+    assert (vibration.elapsed_seconds, vibration.samples) == (13, 2)
+
+
+def test_diagnostic_uses_the_exact_window_from_its_backend_session_and_recomputes_assessment():
+    class RecordingProvider:
+        name = "mock"
+        request = None
+
+        async def diagnose(self, request):
+            self.request = request
+            return await MockDiagnosticProvider().diagnose(request)
+
+    provider = RecordingProvider()
+    session_id = "diagnostic-window"
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        generated = client.post("/api/v1/simulation/generate", json={
+            "pump_id": "pump-01", "scenario": "bearing_wear", "sample_count": 4,
+            "sampling_interval_seconds": 1, "random_seed": 41,
+            "client_session_id": session_id,
+        })
+        assert generated.status_code == 200, generated.text
+        selected = [diagnostic_reading(item) for item in generated.json()["readings"][-2:]]
+        body = request_body()
+        body.update({
+            "client_session_id": session_id,
+            "assessment_timestamp": selected[-1]["timestamp"],
+            "telemetry": selected,
+            "trends": [],
+        })
+        response = client.post("/api/v1/diagnostics", json=body)
+
+    assert response.status_code == 200, response.text
+    assert [item.timestamp.isoformat() for item in provider.request.telemetry] == [
+        datetime.fromisoformat(item["timestamp"].replace("Z", "+00:00")).isoformat() for item in selected
+    ]
+    assert [item.vibration_mm_s for item in provider.request.telemetry] == [
+        item["vibration_mm_s"] for item in selected
+    ]
+    assert provider.request.assessment.status == generated.json()["assessment"]["status"]
+    assert provider.request.assessment.health_score == generated.json()["assessment"]["health_score"]
+    assert provider.request.detector.status == provider.request.assessment.status
+    assert provider.request.detector.score == provider.request.assessment.health_score
+
+
+def test_diagnostic_rejects_another_sessions_window_before_provider_call():
+    class RecordingProvider:
+        name = "amd"
+        calls = 0
+
+        async def diagnose(self, request):
+            self.calls += 1
+            return {}
+
+    provider = RecordingProvider()
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        old = client.post("/api/v1/simulation/generate", json={
+            "pump_id": "pump-01", "scenario": "bearing_wear", "sample_count": 2,
+            "sampling_interval_seconds": 1, "random_seed": 4,
+            "client_session_id": "old-session", "start_time": "2026-10-16T00:00:00Z",
+        }).json()
+        current = client.post("/api/v1/simulation/generate", json={
+            "pump_id": "pump-01", "scenario": "normal", "sample_count": 2,
+            "sampling_interval_seconds": 1, "random_seed": 9,
+            "client_session_id": "current-session", "start_time": "2026-10-17T00:00:00Z",
+        }).json()
+        body = request_body()
+        body.update({
+            "client_session_id": "current-session",
+            "assessment_timestamp": old["readings"][-1]["timestamp"],
+            "telemetry": [diagnostic_reading(item) for item in old["readings"]],
+            "trends": [],
+        })
+        response = client.post("/api/v1/diagnostics", json=body)
+
+    assert response.status_code == 409
+    assert "does not match the selected session evidence window" in response.json()["detail"]
+    assert provider.calls == 0
+    assert current["readings"][-1]["timestamp"] != old["readings"][-1]["timestamp"]
+
+
+def test_diagnostic_cache_key_is_scoped_to_session_and_exact_telemetry_window():
+    first = DiagnosticRequest.model_validate(request_body())
+    second_body = request_body()
+    second_body["telemetry"][0]["vibration_mm_s"] = 7.2
+    second = DiagnosticRequest.model_validate(second_body)
+    third_body = request_body()
+    third_body["client_session_id"] = "another-session"
+    third = DiagnosticRequest.model_validate(third_body)
+
+    assert DiagnosticService._key(first) != DiagnosticService._key(second)
+    assert DiagnosticService._key(first) != DiagnosticService._key(third)
+
+
+def test_diagnostic_request_rejects_duplicate_telemetry_timestamps():
+    body = request_body()
+    body["telemetry"] *= 2
+    with pytest.raises(ValidationError, match="timestamps must be unique"):
+        DiagnosticRequest.model_validate(body)
+
+
 def test_trend_elapsed_accepts_only_javascript_millisecond_precision_difference():
     body = request_body()
     body["telemetry"] = [
@@ -94,8 +224,13 @@ def test_trend_elapsed_rejects_a_difference_beyond_browser_timestamp_precision()
 
 def test_timeout_is_bounded_and_returns_gateway_timeout(monkeypatch):
     monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS", "0.05")
-    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_MOCK_MODE", "timeout")
-    with TestClient(create_app()) as client:
+    class SlowAMDProvider:
+        name = "amd"
+
+        async def diagnose(self, request):
+            await asyncio.sleep(60)
+
+    with TestClient(create_app(diagnostic_provider=SlowAMDProvider())) as client:
         response = client.post("/api/v1/diagnostics", json=request_body())
     assert response.status_code == 504
 
@@ -104,9 +239,12 @@ def test_amd_provider_starts_without_credentials_but_reports_unavailable(monkeyp
     monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_PROVIDER", "amd")
     monkeypatch.delenv("RADEON_API_KEY", raising=False)
     with TestClient(create_app()) as client:
-        assert client.get("/health").status_code == 200
+        health = client.get("/health")
+        simulation = client.post("/api/v1/simulation/generate", json={"pump_id": "pump-no-key", "scenario": "bearing_wear"})
         status = client.get("/api/v1/diagnostics/status").json()
         result = client.post("/api/v1/diagnostics", json=request_body())
+    assert health.status_code == 200
+    assert simulation.status_code == 200, simulation.text
     assert status["provider"] == "amd_unavailable" and status["state"] == "amd_unconfigured"
     assert status["available"] is False
     assert status["configured"] is False and "RADEON_API_KEY" not in str(status)
@@ -160,7 +298,7 @@ def test_invalid_mock_configuration_is_rejected():
         MockDiagnosticProvider("real_amd")
 
 
-def test_unsupported_evidence_claims_are_rejected_as_invalid_provider_output():
+def test_unsupported_evidence_claims_are_rejected_with_safe_reference_metadata(caplog):
     class UnsupportedEvidenceProvider:
         name = "mock"
 
@@ -172,6 +310,12 @@ def test_unsupported_evidence_claims_are_rejected_as_invalid_provider_output():
     with TestClient(create_app(diagnostic_provider=UnsupportedEvidenceProvider())) as client:
         response = client.post("/api/v1/diagnostics", json=request_body())
     assert response.status_code == 502
+    messages = [record.getMessage() for record in caplog.records if "evidence_value_mismatch" in record.getMessage()]
+    assert messages
+    assert "source=telemetry" in messages[-1]
+    assert "field=temperature_c" in messages[-1]
+    assert "value_type=float" in messages[-1]
+    assert "99" not in messages[-1]
 
 
 def test_grounded_numeric_prose_is_allowed_but_unsupported_numeric_prose_is_rejected(caplog):
@@ -197,8 +341,132 @@ def test_grounded_numeric_prose_is_allowed_but_unsupported_numeric_prose_is_reje
         rejected = client.post("/api/v1/diagnostics", json=request_body())
     assert rejected.status_code == 502
     assert rejected.json()["detail"] == "Diagnostic prose contains unsupported numerical evidence"
-    messages = [record.getMessage() for record in caplog.records if "unsupported-prose-number" in record.getMessage()]
-    assert messages and "token='8.2'" in messages[-1]
+    messages = [record.getMessage() for record in caplog.records if "grounding rejected" in record.getMessage()]
+    assert messages and "reason=trend_role_mismatch" in messages[-1]
+    assert "metric_family=vibration" in messages[-1]
+    assert "8.2" not in messages[-1]
+
+
+def _trend_grounding_fixture(summary: str, evidence: list[dict[str, object]]):
+    body = request_body()
+    values = [6.0, 6.2, 1.91, 6.5, 6.7, 6.9, 7.0, 7.1, 7.2, 7.3, 7.4, 7.5]
+    origin = datetime(2026, 10, 17, tzinfo=timezone.utc)
+    body["telemetry"] = [
+        {**body["telemetry"][0], "timestamp": (origin.replace(second=index)).isoformat(), "vibration_mm_s": value}
+        for index, value in enumerate(values)
+    ]
+    body["trends"] = []
+    request = DiagnosticRequest.model_validate(body)
+    request = request.model_copy(update={"trends": DiagnosticService._calculate_request_trends(request)})
+    content = DiagnosticContent.model_validate({
+        "summary": summary,
+        "hypotheses": [{"cause": "Possible bearing wear", "rank": 1, "uncertainty": "high",
+                        "evidence": evidence, "missing_evidence": []}],
+        "missing_evidence": [], "inspection_steps": ["Inspect the bearing safely."],
+        "priority": "soon", "priority_rationale": "The rule assessment is a warning.",
+        "limitations": ["Synthetic telemetry needs physical verification."], "human_review_required": True,
+    })
+    return content, request
+
+
+def test_structured_diagnostic_rejects_the_reported_trend_window_mismatch():
+    content, request = _trend_grounding_fixture(
+        "Vibration increased from 1.91 to 7.30 mm/s.",
+        [
+            {"source": "telemetry", "field": "vibration_mm_s", "metric": "vibration_mm_s", "reading_index": 2, "value": 1.91},
+            {"source": "telemetry", "field": "vibration_mm_s", "metric": "vibration_mm_s", "reading_index": 9, "value": 7.3},
+        ],
+    )
+    trend = next(item for item in request.trends if item.metric == "vibration_mm_s")
+    assert (trend.initial_value, trend.latest_value) == (6.0, 7.5)
+    with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
+        DiagnosticService._validate_grounding(content, request)
+
+
+def test_structured_diagnostic_accepts_the_authoritative_trend_pair():
+    content, request = _trend_grounding_fixture(
+        "Vibration increased from 6.0 to 7.5 mm/s.",
+        [
+            {"source": "trend", "field": "initial_value", "metric": "vibration_mm_s", "value": 6.0},
+            {"source": "trend", "field": "latest_value", "metric": "vibration_mm_s", "value": 7.5},
+        ],
+    )
+    DiagnosticService._validate_grounding(content, request)
+
+
+def test_structured_diagnostic_accepts_a_cited_rule_threshold_with_the_verified_trend():
+    content, request = _trend_grounding_fixture(
+        "Vibration increased from 6.0 to 7.5 mm/s. Warning at 7.5 mm/s against a 4.5 mm/s threshold.",
+        [
+            {"source": "trend", "field": "initial_value", "metric": "vibration_mm_s", "value": 6.0},
+            {"source": "trend", "field": "latest_value", "metric": "vibration_mm_s", "value": 7.5},
+            {"source": "alert", "field": "observed_value", "value": 7.5},
+            {"source": "alert", "field": "expected_range", "value": "0–4.5 mm/s"},
+        ],
+    )
+    request = request.model_copy(update={
+        "alert": request.alert.model_copy(update={"observed_value": 7.5})
+    })
+    DiagnosticService._validate_grounding(content, request)
+
+
+def test_structured_diagnostic_keeps_first_latest_and_delta_roles_distinct():
+    content, request = _trend_grounding_fixture(
+        "The vibration began at 6.0 mm/s and is now 7.5 mm/s; it increased by 1.5 mm/s.",
+        [
+            {"source": "trend", "field": "initial_value", "metric": "vibration_mm_s", "value": 6.0},
+            {"source": "trend", "field": "latest_value", "metric": "vibration_mm_s", "value": 7.5},
+            {"source": "trend", "field": "delta", "metric": "vibration_mm_s", "value": 1.5},
+        ],
+    )
+    DiagnosticService._validate_grounding(content, request)
+
+
+def test_structured_diagnostic_distinguishes_sample_count_from_elapsed_duration():
+    content, request = _trend_grounding_fixture(
+        "The vibration trend increased across 12 recorded samples.",
+        [{"source": "trend", "field": "samples", "metric": "vibration_mm_s", "value": 12}],
+    )
+    DiagnosticService._validate_grounding(content, request)
+
+
+def test_structured_diagnostic_rejects_a_number_without_a_metric_or_evidence_role():
+    content, request = _trend_grounding_fixture(
+        "The recorded value is 7.5.",
+        [{"source": "trend", "field": "latest_value", "metric": "vibration_mm_s", "value": 7.5}],
+    )
+    with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
+        DiagnosticService._validate_grounding(content, request)
+
+
+@pytest.mark.parametrize("summary", [
+    "Temperature increased from 6.0 to 7.5 mm/s.",
+    "Vibration increased from 6.0 °C to 7.5 mm/s.",
+    "Vibration increased from 6.0 mm/s to 7.5 dB.",
+])
+def test_structured_diagnostic_rejects_metric_and_unit_mismatches(summary):
+    content, request = _trend_grounding_fixture(
+        summary,
+        [
+            {"source": "trend", "field": "initial_value", "metric": "vibration_mm_s", "value": 6.0},
+            {"source": "trend", "field": "latest_value", "metric": "vibration_mm_s", "value": 7.5},
+        ],
+    )
+    with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
+        DiagnosticService._validate_grounding(content, request)
+
+
+@pytest.mark.parametrize("summary", [
+    "The mean vibration was 7.5 mm/s.",
+    "The minimum vibration was 7.5 mm/s.",
+])
+def test_structured_diagnostic_does_not_treat_trend_endpoint_as_other_statistic(summary):
+    content, request = _trend_grounding_fixture(
+        summary,
+        [{"source": "trend", "field": "latest_value", "metric": "vibration_mm_s", "value": 7.5}],
+    )
+    with pytest.raises(ProviderInvalidResponse, match="unsupported numerical evidence"):
+        DiagnosticService._validate_grounding(content, request)
 
 
 def test_telemetry_evidence_rejects_a_mismatched_metric_association():
@@ -259,6 +527,7 @@ def test_unverified_credentials_are_not_in_settings_repr(monkeypatch):
 
 def test_radeon_configuration_defaults_and_validation(monkeypatch):
     from pumpguard.config import get_settings
+    monkeypatch.delenv("PUMPGUARD_DIAGNOSTIC_PROVIDER", raising=False)
     monkeypatch.delenv("RADEON_BASE_URL", raising=False)
     monkeypatch.delenv("RADEON_MODEL", raising=False)
     monkeypatch.delenv("RADEON_API_KEY", raising=False)
@@ -266,9 +535,93 @@ def test_radeon_configuration_defaults_and_validation(monkeypatch):
     assert settings.radeon_base_url == "https://developer.amd.com.cn/radeon/api/v1"
     assert settings.radeon_model == "DeepSeek-V4-Flash"
     assert settings.radeon_api_key is None
+    assert settings.diagnostic_provider == "amd"
     monkeypatch.setenv("RADEON_BASE_URL", "http://unsafe.example/v1")
     with pytest.raises(ValueError, match="HTTPS"):
         get_settings()
+
+
+def test_mock_provider_cannot_be_selected_as_a_runtime_provider(monkeypatch):
+    from pumpguard.config import get_settings
+    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_PROVIDER", "mock")
+    with pytest.raises(ValueError, match="must be amd"):
+        get_settings()
+
+
+def test_runtime_wires_one_amd_provider_to_all_ai_services(monkeypatch):
+    from pumpguard.services.diagnostics.providers import AmdProvider
+    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_PROVIDER", "amd")
+    monkeypatch.delenv("RADEON_API_KEY", raising=False)
+    app = create_app()
+    structured = app.state.diagnostic_service.provider
+    chat = app.state.diagnostic_chat_service.provider
+    assert isinstance(structured, AmdProvider)
+    assert chat is structured
+    assert structured.name == "amd_unavailable"
+
+
+def _amd_trend_request_body():
+    body = request_body()
+    origin = datetime(2026, 10, 17, tzinfo=timezone.utc)
+    values = [6.0, 1.91, 7.3, 7.5]
+    body["telemetry"] = [
+        {**body["telemetry"][0], "timestamp": origin.replace(second=index).isoformat(), "vibration_mm_s": value}
+        for index, value in enumerate(values)
+    ]
+    body["assessment_timestamp"] = body["telemetry"][-1]["timestamp"]
+    body["alert"]["observed_value"] = 7.5
+    return body
+
+
+@pytest.mark.parametrize(("summary", "evidence_value"), [
+    ("Vibration increased from 1.91 to 7.30 mm/s.", 7.3),
+    ("Vibration increased from 6.0 to 7.5 mm/s.", 7.5),
+])
+def test_amd_structured_explanation_renders_valid_schema_without_grounding_authorization(summary, evidence_value):
+    class AmdNarrativeProvider:
+        name = "amd"
+
+        def __init__(self):
+            self.request = None
+
+        async def diagnose(self, request):
+            self.request = request
+            return {
+                "summary": summary,
+                "hypotheses": [{"cause": "Possible bearing wear", "rank": 1, "uncertainty": "high",
+                    "evidence": [{"source": "trend", "field": "latest_value", "metric": "vibration_mm_s", "value": evidence_value}],
+                    "missing_evidence": []}],
+                "missing_evidence": [], "inspection_steps": ["Inspect the bearing safely."],
+                "priority": "soon", "priority_rationale": "Demo explanation.",
+                "limitations": ["Synthetic data."], "human_review_required": True,
+            }
+
+    provider = AmdNarrativeProvider()
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        response = client.post("/api/v1/diagnostics", json=_amd_trend_request_body())
+
+    assert response.status_code == 200, response.text
+    assert response.json()["provider"] == "amd"
+    assert response.json()["is_mock"] is False
+    assert response.json()["summary"] == summary
+    assert (provider.request.trends[1].initial_value, provider.request.trends[1].latest_value) == (6.0, 7.5)
+
+
+def test_amd_schema_invalid_response_is_rejected_after_provider_success():
+    class InvalidAMDProvider:
+        name = "amd"
+        calls = 0
+
+        async def diagnose(self, request):
+            self.calls += 1
+            return {"summary": "A partial but successful provider response."}
+
+    provider = InvalidAMDProvider()
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        response = client.post("/api/v1/diagnostics", json=request_body())
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Diagnostic provider returned an invalid response"
+    assert provider.calls == 1
 
 
 def test_diagnostic_provider_failure_does_not_mutate_detector_or_telemetry():
@@ -565,6 +918,38 @@ def test_amd_upstream_error_returns_failure_without_mock_fallback():
     assert response.json()["detail"] == "AMD gateway is temporarily unavailable"
     assert "mock" not in response.text.lower()
     assert "unit-test-secret" not in response.text
+    client.close()
+
+
+@pytest.mark.parametrize(("upstream_status", "expected_status", "detail"), [
+    (401, 503, "AMD credentials were rejected"),
+    (403, 503, "AMD credentials were rejected"),
+    (429, 429, "AMD request rate limit reached"),
+    (503, 503, "AMD gateway is temporarily unavailable"),
+])
+def test_amd_auth_rate_limit_and_upstream_errors_are_mapped_without_fallback(
+    upstream_status, expected_status, detail,
+):
+    import httpx
+    from openai import OpenAI
+    from pumpguard.services.diagnostics.providers import AmdProvider
+
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "DeepSeek-V4-Flash"}]})
+        return httpx.Response(upstream_status, json={"error": {"message": "provider failure"}})
+
+    client = OpenAI(base_url="https://amd.example/v1", api_key="unit-test-secret",
+                    http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    provider = AmdProvider("https://amd.example/v1", "DeepSeek-V4-Flash", "unit-test-secret", client=client)
+    with TestClient(create_app(diagnostic_provider=provider)) as api:
+        response = api.post("/api/v1/diagnostics", json=request_body())
+
+    assert response.status_code == expected_status
+    assert response.json()["detail"] == detail
+    assert "unit-test-secret" not in response.text
+    if upstream_status == 429:
+        assert response.headers["retry-after"] == "1"
     client.close()
 
 

@@ -14,17 +14,15 @@ class Settings:
     """Runtime settings."""
     history_limit:int=1000
     log_level:str="INFO"
-    diagnostic_provider:str="mock"
+    diagnostic_provider:str="amd"
     diagnostic_timeout_seconds:float=50.0
     diagnostic_connect_timeout_seconds:float=3.0
-    diagnostic_mock_mode:str="success"
     radeon_base_url:str="https://developer.amd.com.cn/radeon/api/v1"
     radeon_model:str="DeepSeek-V4-Flash"
     radeon_api_key:str|None=field(default=None,repr=False)
     diagnostic_max_output_tokens:int=700
     cors_origins:tuple[str,...]=("http://localhost:5173","http://127.0.0.1:5173")
     rate_limit_window_seconds:int=60
-    rate_limit_diagnostics:int=10
     rate_limit_simulation:int=120
     rate_limit_analysis:int=60
     rate_limit_ml:int=30
@@ -32,14 +30,12 @@ def get_settings() -> Settings:
     """Read environment settings."""
     n=int(os.getenv("PUMPGUARD_HISTORY_LIMIT","1000"))
     if n<1: raise ValueError("PUMPGUARD_HISTORY_LIMIT must be positive")
-    provider=os.getenv("PUMPGUARD_DIAGNOSTIC_PROVIDER","mock").lower()
-    if provider not in {"mock","amd"}: raise ValueError("PUMPGUARD_DIAGNOSTIC_PROVIDER must be mock or amd")
+    provider=os.getenv("PUMPGUARD_DIAGNOSTIC_PROVIDER","amd").lower()
+    if provider != "amd": raise ValueError("PUMPGUARD_DIAGNOSTIC_PROVIDER must be amd; mock providers are test-only")
     timeout=float(os.getenv("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS","50"))
     if not .05<=timeout<=120: raise ValueError("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS must be between 0.05 and 120")
     connect_timeout=float(os.getenv("PUMPGUARD_DIAGNOSTIC_CONNECT_TIMEOUT_SECONDS","3"))
     if not .05<=connect_timeout<=30: raise ValueError("PUMPGUARD_DIAGNOSTIC_CONNECT_TIMEOUT_SECONDS must be between 0.05 and 30")
-    mock_mode=os.getenv("PUMPGUARD_DIAGNOSTIC_MOCK_MODE","success").lower()
-    if mock_mode not in {"success","timeout","rate_limit","malformed","unavailable"}: raise ValueError("Invalid PUMPGUARD_DIAGNOSTIC_MOCK_MODE")
     base_url=os.getenv("RADEON_BASE_URL","https://developer.amd.com.cn/radeon/api/v1").rstrip("/")
     if not base_url.startswith("https://"):
         raise ValueError("RADEON_BASE_URL must use HTTPS")
@@ -62,7 +58,6 @@ def get_settings() -> Settings:
     window=int(os.getenv("PUMPGUARD_RATE_LIMIT_WINDOW_SECONDS","60"))
     if not 1<=window<=3600: raise ValueError("PUMPGUARD_RATE_LIMIT_WINDOW_SECONDS must be between 1 and 3600")
     limits={name: int(os.getenv(env, str(default))) for name, env, default in (
-        ("diagnostics", "PUMPGUARD_RATE_LIMIT_DIAGNOSTICS", 10),
         ("simulation", "PUMPGUARD_RATE_LIMIT_SIMULATION", 120),
         ("analysis", "PUMPGUARD_RATE_LIMIT_ANALYSIS", 60),
         ("ml", "PUMPGUARD_RATE_LIMIT_ML", 30),
@@ -71,9 +66,9 @@ def get_settings() -> Settings:
         raise ValueError("PUMPGUARD_RATE_LIMIT_* values must be positive")
     return Settings(history_limit=n, log_level=os.getenv("PUMPGUARD_LOG_LEVEL","INFO").upper(),
         diagnostic_provider=provider, diagnostic_timeout_seconds=timeout,
-        diagnostic_connect_timeout_seconds=connect_timeout, diagnostic_mock_mode=mock_mode,
+        diagnostic_connect_timeout_seconds=connect_timeout,
         radeon_base_url=base_url, radeon_model=model, radeon_api_key=key,
         diagnostic_max_output_tokens=max_tokens, cors_origins=origins,
-        rate_limit_window_seconds=window, rate_limit_diagnostics=limits["diagnostics"],
+        rate_limit_window_seconds=window,
         rate_limit_simulation=limits["simulation"], rate_limit_analysis=limits["analysis"],
         rate_limit_ml=limits["ml"])

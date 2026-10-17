@@ -37,13 +37,13 @@ describe('DiagnosticChat', () => {
   });
 
   it('sends the active client session with chat evidence requests', async () => {
-    const request = vi.fn().mockResolvedValue({ assistant_message: 'Scoped answer.', provider: 'amd', is_mock: false, latency_ms: 1 });
+    const request = vi.fn().mockResolvedValue({ assistant_message: 'Vibration increased from 1.91 to 7.30 mm/s.', provider: 'amd', is_mock: false, latency_ms: 1 });
     setup(request, 'session-current');
     fireEvent.change(screen.getByLabelText('Ask about this pump'), { target: { value: 'What changed?' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await screen.findByText('Scoped answer.');
+    expect(await screen.findByText('Vibration increased from 1.91 to 7.30 mm/s.')).toBeInTheDocument();
     expect(request).toHaveBeenCalledWith({ pump_id: 'pump-01', client_session_id: 'session-current', question: 'What changed?', history: [] });
-    expect(screen.getByText(/AMD-generated response/)).toBeInTheDocument();
+    expect(screen.getByText(/AI-generated demo explanation · AMD/)).toBeInTheDocument();
   });
 
   it('never labels contradictory AMD mock provenance as an AMD response', async () => {
@@ -53,7 +53,7 @@ describe('DiagnosticChat', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await screen.findByText('Unverified answer.');
     expect(screen.getByText(/TEST MOCK — not AMD-generated/)).toBeInTheDocument();
-    expect(screen.queryByText(/AMD-generated response/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/AI-generated demo explanation · AMD/)).not.toBeInTheDocument();
   });
 
   it('shows an error and retries the failed question', async () => {
@@ -64,6 +64,7 @@ describe('DiagnosticChat', () => {
     fireEvent.change(screen.getByLabelText('Ask about this pump'), { target: { value: 'What should I inspect?' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('AMD gateway unavailable');
+    expect(screen.queryByText(/AI-generated demo explanation · AMD/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('Retry succeeded.')).toBeInTheDocument();
     expect(request).toHaveBeenCalledTimes(2);
@@ -81,7 +82,7 @@ describe('DiagnosticChat', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByText('warning')).toBeInTheDocument();
     expect(screen.getByText('warning').tagName).toBe('STRONG');
-    expect(screen.getByText(/AMD-generated response/)).toBeInTheDocument();
+    expect(screen.getByText(/AI-generated demo explanation · AMD/)).toBeInTheDocument();
     expect(screen.queryByRole('script')).not.toBeInTheDocument();
     expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument();
   });
@@ -96,7 +97,7 @@ describe('DiagnosticChat', () => {
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', shiftKey: false });
     expect(await screen.findByRole('alert')).toHaveTextContent('Provider status unavailable');
     expect(request).toHaveBeenCalledWith({ pump_id: 'pump-01', question: 'Can you inspect this pump?', history: [] });
-    expect(screen.queryByText(/AMD-generated response/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/AI-generated demo explanation · AMD/)).not.toBeInTheDocument();
   });
 
   it('keeps Enter as submit and Shift+Enter as newline while provider status is unavailable', async () => {

@@ -22,25 +22,16 @@ class DemoRateLimitMiddleware(BaseHTTPMiddleware):
     or shared rate limiting as well.
     """
 
-    def __init__(self, app, *, window_seconds: int, diagnostics: int,
-                 simulation: int, analysis: int, ml: int) -> None:
+    def __init__(self, app, *, window_seconds: int, simulation: int, analysis: int, ml: int) -> None:
         super().__init__(app)
         self.window_seconds = window_seconds
         self.rules: tuple[Rule, ...] = (
-            ("diagnostics", diagnostics, self._is_diagnostics),
             ("simulation", simulation, self._is_simulation),
             ("analysis", analysis, self._is_analysis),
             ("ml", ml, self._is_ml),
         )
         self._requests: dict[tuple[str, str], deque[float]] = defaultdict(deque)
         self._lock = RLock()
-
-    @staticmethod
-    def _is_diagnostics(method: str, path: str) -> bool:
-        return method in {"GET", "POST"} and path in {
-            "/api/v1/diagnostics", "/api/v1/diagnostics/chat",
-            "/api/v1/diagnostics/ai-feature", "/api/v1/diagnostics/models",
-        }
 
     @staticmethod
     def _is_simulation(method: str, path: str) -> bool:

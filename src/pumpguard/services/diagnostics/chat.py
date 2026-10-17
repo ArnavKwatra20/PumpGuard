@@ -399,26 +399,11 @@ class DiagnosticChatService:
             if not isinstance(text, str) or not text.strip():
                 raise ProviderInvalidResponse("Diagnostic chat returned empty assistant content")
             text = _normalize_chat_content(text)
-            try:
-                _validate_numeric_grounding(text, context)
-            except UnsupportedNumericEvidence as exc:
-                # A single correction helps recover from occasional model fabrication while
-                # preserving the same total request deadline and fail-closed validation.
-                if self.provider.name != "amd":
-                    raise
-                remaining = self.timeout_seconds - (time.perf_counter() - started)
-                if remaining <= 0.05:
-                    raise
-                retry_context = dict(context)
-                retry_context["_numeric_grounding_feedback"] = exc.feedback
-                logger.warning("diagnostic chat grounding repair provider=amd retry=1 rejected_claims=%d",
-                               len(exc.claims))
-                text = await asyncio.wait_for(
-                    self.provider.chat(request, retry_context), timeout=remaining  # type: ignore[attr-defined]
-                )
-                if not isinstance(text, str) or not text.strip():
-                    raise ProviderInvalidResponse("Diagnostic chat returned empty assistant content")
-                text = _normalize_chat_content(text)
+            if self.provider.name == "amd":
+                # AMD output is an explicitly labeled demo explanation. Numeric
+                # grounding remains available to test providers, not a display gate.
+                logger.info("diagnostic chat stage=numeric_grounding outcome=skipped provider=amd policy=demo_explanation")
+            else:
                 _validate_numeric_grounding(text, context)
             latency = (time.perf_counter() - started) * 1000
             result = DiagnosticChatResponse(

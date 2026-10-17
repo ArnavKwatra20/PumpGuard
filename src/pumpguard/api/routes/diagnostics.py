@@ -3,9 +3,14 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import ValidationError
 
-from pumpguard.models.diagnostic import DiagnosticRequest, DiagnosticResult, MLPredictionEvidence
+from pumpguard.models.diagnostic import (
+    DiagnosticRequest, DiagnosticResult, DiagnosticTelemetry, DetectorEvidence,
+    HealthAssessmentEvidence, MLPredictionEvidence,
+)
 from pumpguard.services.diagnostics.providers import ProviderInvalidResponse, ProviderRateLimited, ProviderTimedOut, ProviderUnsupportedModel, ProviderUnavailable
 from pumpguard.services.diagnostics.service import DiagnosticTimeout
+from pumpguard.services.health_service import assess_reading
+from pumpguard.services.telemetry_service import UnknownPumpError
 
 router = APIRouter(tags=["diagnostics"])
 MAX_DIAGNOSTIC_REQUEST_BYTES = 32 * 1024
@@ -45,7 +50,7 @@ async def diagnostic_models(request: Request) -> dict[str, object]:
 
 
 @router.post("/diagnostics", response_model=DiagnosticResult,
-             summary="Request evidence-grounded diagnostic explanation",
+             summary="Request structured AMD demo explanation",
              openapi_extra={"requestBody": {"required": True, "content": {"application/json": {"schema": DiagnosticRequest.model_json_schema()}}}})
 async def diagnose(request: Request) -> DiagnosticResult:
     """Bound and validate request bytes before dispatching to the configured provider."""
@@ -62,6 +67,39 @@ async def diagnose(request: Request) -> DiagnosticResult:
     except ValidationError as exc:
         errors = [{"loc": error["loc"], "msg": error["msg"], "type": error["type"]} for error in exc.errors()]
         raise HTTPException(status_code=422, detail=errors) from exc
+    if payload.client_session_id:
+        try:
+            stored = request.app.state.telemetry.history(
+                payload.pump_id, limit=1000, client_session_id=payload.client_session_id,
+            )
+        except UnknownPumpError as exc:
+            raise HTTPException(status_code=409,
+                detail="Diagnostic telemetry session is unavailable; generate a fresh simulation and retry.") from exc
+        stored_oldest_first = list(reversed(stored))
+        # A dashboard tick can arrive between the last rendered reading and this
+        # request. Match the exact submitted window ending at its assessment time,
+        # while excluding any later backend samples from this request's evidence.
+        eligible = [reading for reading in stored_oldest_first
+                    if reading.timestamp <= payload.assessment_timestamp]
+        expected_window = eligible[-len(payload.telemetry):]
+        canonical_window = [DiagnosticTelemetry.from_reading(reading) for reading in expected_window]
+        if (not expected_window or expected_window[-1].timestamp != payload.assessment_timestamp
+                or canonical_window != payload.telemetry):
+            raise HTTPException(status_code=409,
+                detail="Diagnostic telemetry does not match the selected session evidence window; refresh the assessment and retry.")
+        authoritative_assessment = assess_reading(expected_window[-1])
+        payload = payload.model_copy(update={
+            "telemetry": canonical_window,
+            "detector": DetectorEvidence(
+                status=authoritative_assessment.status,
+                score=authoritative_assessment.health_score,
+                predicted_faults=authoritative_assessment.detected_faults,
+                confidence=None,
+            ),
+            "assessment": HealthAssessmentEvidence.model_validate(
+                authoritative_assessment.model_dump(exclude={"pump_id", "timestamp", "detected_faults"})
+            ),
+        })
     try:
         ml_prediction = await asyncio.to_thread(request.app.state.ml_inference.predict, payload.telemetry)
         if ml_prediction:

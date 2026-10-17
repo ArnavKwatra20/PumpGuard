@@ -574,7 +574,7 @@ describe('digital twin dashboard', () => {
     const requestButton = await screen.findByRole('button', { name: /request diagnostic explanation/i });
     await waitFor(() => expect(requestButton).toBeEnabled());
     fireEvent.click(requestButton);
-    expect(await screen.findByText(/MOCK RESULT · NOT AN AMD MODEL/)).toBeInTheDocument();
+    expect(await screen.findByText(/TEST MOCK · NOT AN AMD MODEL/)).toBeInTheDocument();
     expect(diagnose).toHaveBeenCalledWith(expect.objectContaining({
       is_synthetic: true, alert_episode_id: expect.any(String), telemetry: [expect.objectContaining({ vibration_mm_s: 7.1 })],
       detector: expect.objectContaining({ status: 'warning', confidence: null }),
@@ -599,7 +599,7 @@ describe('digital twin dashboard', () => {
     expect(await screen.findByText(/AMD · 3 ms/)).toBeInTheDocument();
   });
 
-  it('derives diagnostic trends from the exact telemetry window sent to the provider', async () => {
+  it('sends the exact diagnostic telemetry window for backend trend calculation', async () => {
     const base = Date.now() - 12_000;
     const readings = Array.from({ length: 13 }, (_, index) => ({
       ...fixture.readings[0], timestamp: new Date(base + index * 1000).toISOString(),
@@ -623,11 +623,12 @@ describe('digital twin dashboard', () => {
     fireEvent.click(requestButton);
     await waitFor(() => expect(diagnose).toHaveBeenCalledTimes(1));
     const request = diagnose.mock.calls[0][0] as DiagnosticRequest;
-    const vibrationTrend = request.trends.find((item) => item.metric === 'vibration_mm_s');
     expect(request.telemetry).toHaveLength(12);
     expect(request.telemetry[0].vibration_mm_s).toBe(6);
     expect(request.telemetry.at(-1)?.vibration_mm_s).toBe(7.5);
-    expect(vibrationTrend).toMatchObject({ initial_value: 6, latest_value: 7.5, delta: 1.5, samples: 12 });
+    expect(request.client_session_id).toBeTruthy();
+    expect(request.client_session_id).toBe(request.simulation_id);
+    expect(request.trends).toEqual([]);
   });
 
   it('keeps deterministic alert controls available when a diagnostic provider fails', async () => {

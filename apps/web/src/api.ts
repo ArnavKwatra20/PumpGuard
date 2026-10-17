@@ -40,6 +40,7 @@ export interface SimulationSnapshot {
 
 export interface DiagnosticRequest {
   pump_id: string;
+  client_session_id?: string;
   simulation_id?: string;
   alert_episode_id?: string;
   assessment_timestamp: string;

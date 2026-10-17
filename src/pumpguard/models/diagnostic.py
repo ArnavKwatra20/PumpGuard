@@ -98,6 +98,8 @@ class MLPredictionEvidence(BaseModel):
 class DiagnosticRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     pump_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    client_session_id: str | None = Field(default=None, min_length=1, max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
     simulation_id: str | None = Field(default=None, max_length=64)
     alert_episode_id: str | None = Field(default=None, max_length=128)
     assessment_timestamp: datetime
@@ -116,6 +118,9 @@ class DiagnosticRequest(BaseModel):
     def consistent_episode(self) -> "DiagnosticRequest":
         if self.alert and self.alert_episode_id and self.alert.episode_id != self.alert_episode_id:
             raise ValueError("alert_episode_id must match alert.episode_id")
+        timestamps = [reading.timestamp for reading in self.telemetry]
+        if len(timestamps) != len(set(timestamps)):
+            raise ValueError("telemetry timestamps must be unique")
         if any(left.timestamp > right.timestamp for left, right in zip(self.telemetry, self.telemetry[1:])):
             raise ValueError("telemetry samples must be ordered oldest to newest")
         return self

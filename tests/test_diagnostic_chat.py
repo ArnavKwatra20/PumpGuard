@@ -109,8 +109,8 @@ def test_chat_provider_failure_preserves_rule_assessment():
         response = client.post("/api/v1/diagnostics/chat", json={"pump_id": "chat-pump", "question": "What happened?"})
         assessment = client.get("/api/v1/pumps/chat-pump/assessment").json()
     assert response.status_code == 504
-    assert "No AMD-generated response was produced" in response.json()["detail"]
-    assert "rule-based assessment remains authoritative" in response.json()["detail"]
+    assert "No response from test mock was produced" in response.json()["detail"]
+    assert "existing monitoring data remains unchanged" in response.json()["detail"]
     assert assessment == generated["assessment"]
 
 
@@ -243,23 +243,15 @@ def test_chat_allows_supported_value_but_rejects_unsupported_numeric_claim(caplo
     assert messages and "token='42.0'" in messages[-1]
 
 
-def test_amd_chat_retries_once_with_grounding_feedback_and_accepts_corrected_answer():
-    class CorrectingAMDProvider(RecordingChatProvider):
+def test_amd_chat_returns_numeric_mismatch_as_demo_output_without_grounding_retry():
+    class NumericMismatchAMDProvider(RecordingChatProvider):
         name = "amd"
-
-        def __init__(self):
-            super().__init__()
-            self.responses = [
-                "The vibration is 999.9 mm/s; inspect the bearing.",
-                "The rule assessment supports inspecting the bearing and vibration sensor.",
-            ]
-
         async def chat(self, request, context):
             self.requests.append(request)
             self.contexts.append(context)
-            return self.responses[len(self.requests) - 1]
+            return "Vibration increased from 1.91 to 7.30 mm/s; inspect the bearing."
 
-    provider = CorrectingAMDProvider()
+    provider = NumericMismatchAMDProvider()
     with TestClient(create_app(diagnostic_provider=provider)) as client:
         client.post("/api/v1/simulation/generate", json=seed_request())
         response = client.post("/api/v1/diagnostics/chat", json={
@@ -269,37 +261,9 @@ def test_amd_chat_retries_once_with_grounding_feedback_and_accepts_corrected_ans
     assert response.status_code == 200, response.text
     assert response.json()["provider"] == "amd"
     assert response.json()["is_mock"] is False
-    assert response.json()["assistant_message"] == provider.responses[1]
-    assert len(provider.requests) == 2
-    assert "999.9 (vibration)" in provider.contexts[1]["_numeric_grounding_feedback"]
+    assert response.json()["assistant_message"] == "Vibration increased from 1.91 to 7.30 mm/s; inspect the bearing."
+    assert len(provider.requests) == 1
     assert "_numeric_grounding_feedback" not in provider.contexts[0]
-
-
-def test_amd_chat_fails_closed_after_one_unsupported_numeric_retry():
-    class StillUnsupportedAMDProvider(RecordingChatProvider):
-        name = "amd"
-
-        def __init__(self):
-            super().__init__()
-
-        async def chat(self, request, context):
-            self.requests.append(request)
-            self.contexts.append(context)
-            return "The vibration is 999.9 mm/s; inspect the bearing."
-
-    provider = StillUnsupportedAMDProvider()
-    with TestClient(create_app(diagnostic_provider=provider)) as client:
-        client.post("/api/v1/simulation/generate", json=seed_request())
-        response = client.post("/api/v1/diagnostics/chat", json={
-            "pump_id": "chat-pump", "question": "What should I inspect?",
-        })
-        assessment = client.get("/api/v1/pumps/chat-pump/assessment")
-
-    assert response.status_code == 502
-    assert "No AMD-generated response was produced" in response.json()["detail"]
-    assert len(provider.requests) == 2
-    assert "999.9 (vibration)" in provider.contexts[1]["_numeric_grounding_feedback"]
-    assert assessment.status_code == 200
 
 
 def test_mock_chat_does_not_retry_numeric_grounding_failures():
@@ -497,7 +461,7 @@ def test_amd_chat_uses_final_content_not_reasoning_and_validates_envelope():
     assert "reasoning" not in response.text.lower()
 
 
-def test_amd_adapter_sends_grounding_feedback_as_system_instruction_and_revalidates():
+def test_amd_adapter_returns_numeric_mismatch_without_grounding_retry():
     chat_requests = []
 
     def handler(request):
@@ -505,8 +469,7 @@ def test_amd_adapter_sends_grounding_feedback_as_system_instruction_and_revalida
             return httpx.Response(200, json={"data": [{"id": "DeepSeek-V4-Flash"}]})
         body = json.loads(request.content)
         chat_requests.append(body)
-        content = ("The vibration is 999.9 mm/s; inspect the bearing." if len(chat_requests) == 1
-                   else "Inspect the vibration sensor and bearing based on the current assessment.")
+        content = "The vibration is 999.9 mm/s; inspect the bearing."
         return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {
             "role": "assistant", "content": content}}]})
 
@@ -520,18 +483,18 @@ def test_amd_adapter_sends_grounding_feedback_as_system_instruction_and_revalida
     assert response.status_code == 200, response.text
     assert response.json()["provider"] == "amd"
     assert response.json()["is_mock"] is False
-    assert len(chat_requests) == 2
-    retry_system = chat_requests[1]["messages"][0]["content"]
-    retry_context = chat_requests[1]["messages"][1]["content"]
-    assert "999.9 (vibration)" in retry_system
-    assert "_numeric_grounding_feedback" not in retry_context
+    assert response.json()["assistant_message"] == "The vibration is 999.9 mm/s; inspect the bearing."
+    assert len(chat_requests) == 1
+    assert "MANDATORY NUMERIC-GROUNDING CORRECTION" not in chat_requests[0]["messages"][0]["content"]
+    assert "_numeric_grounding_feedback" not in chat_requests[0]["messages"][1]["content"]
 
 
-def test_amd_chat_prompt_forbids_unseen_numeric_estimates():
+def test_amd_chat_prompt_preserves_context_limits_without_rule_authorization():
     assert "never estimate, interpolate" in _CHAT_SYSTEM_INSTRUCTIONS
     assert "omit it and state that the evidence is insufficient" in _CHAT_SYSTEM_INSTRUCTIONS
-    assert "current_rule_assessment.anomalies" in _CHAT_SYSTEM_INSTRUCTIONS
-    assert "sample or excursion counts" in _CHAT_SYSTEM_INSTRUCTIONS
+    assert "synthesize relevant telemetry, trends, configured thresholds" in _CHAT_SYSTEM_INSTRUCTIONS
+    assert "do not treat any one assessment as authorization" in _CHAT_SYSTEM_INSTRUCTIONS
+    assert "current_rule_assessment.anomalies" not in _CHAT_SYSTEM_INSTRUCTIONS
 
 
 def test_amd_chat_rejects_empty_malformed_truncated_and_upstream_502_responses():

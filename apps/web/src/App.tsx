@@ -7,7 +7,7 @@ import { isTelemetryReading, validateSimulationResponse } from './response-valid
 import { DiagnosticExplorer } from './DiagnosticExplorer';
 import { TelemetryAnalysisPanel } from './TelemetryAnalysisPanel';
 import { AiFeaturePanel } from './AiFeaturePanel';
-import { calculateMetricTrend, MEASUREMENTS, type MetricKey } from './diagnostics';
+import { MEASUREMENTS, type MetricKey } from './diagnostics';
 import { createAlarmAudio, type AlarmAudio } from './alarm-audio';
 
 const PumpScene = lazy(() => import('./PumpScene').then((module) => ({ default: module.PumpScene })));
@@ -143,7 +143,7 @@ function EventTimeline({ monitoring, snapshot, alerts, diagnosis, sessionEvents 
   for (const event of snapshot?.events ?? []) items.push({ id: `${event.kind}-${event.time_seconds}-${event.scenario}`, label: event.kind.replaceAll('_', ' '), time: `${event.time_seconds.toFixed(1)} s`, tone: event.kind.includes('fault') ? 'alert' : 'info' });
   for (const alert of alerts) items.push({ id: alert.id, label: `${alert.state === 'resolved' ? 'Fault resolved' : 'Alert'} · ${alert.metric.replaceAll('_', ' ')}`, time: new Date(alert.timestamp).toLocaleTimeString(), tone: alert.severity === 'critical' ? 'alert' : 'warn' });
   items.push(...sessionEvents);
-  if (diagnosis) items.push({ id: `diagnosis-${diagnosis.correlation_id}`, label: `Diagnostic generated · ${diagnosis.provider === 'mock' ? 'mock' : 'provider'}`, time: new Date(diagnosis.assessment_timestamp).toLocaleTimeString(), tone: 'info' });
+  if (diagnosis) items.push({ id: `diagnosis-${diagnosis.correlation_id}`, label: `Diagnostic explanation · ${diagnosis.provider === 'amd' && !diagnosis.is_mock ? 'AMD demo' : diagnosis.is_mock ? 'test mock' : 'provider unavailable'}`, time: new Date(diagnosis.assessment_timestamp).toLocaleTimeString(), tone: 'info' });
   const unique = [...new Map(items.map((item) => [item.id, item])).values()].slice(-8);
   return <section className="event-timeline panel" aria-label="Session event timeline"><div className="timeline-heading"><div><span className="panel-kicker">SESSION HISTORY</span><h2>Event timeline</h2></div><span>IN-MEMORY SESSION</span></div>{unique.length ? <ol>{unique.map((item) => <li key={item.id} className={item.tone}><i/><time>{item.time}</time><b>{item.label}</b></li>)}</ol> : <p>No simulation events yet. Start a simulation to record session events.</p>}</section>;
 }
@@ -468,23 +468,20 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
     if (!assessment || !telemetry || !api.diagnose || diagnosticLoading) return;
     const samples = [...readings].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp)).slice(-12);
     if (!samples.length) samples.push(telemetry);
-    const trends = (Object.keys(MEASUREMENTS) as MetricKey[]).flatMap((metric) => {
-      const trend = calculateMetricTrend(samples, metric);
-      return trend ? [{ metric, initial_value: trend.initialValue, latest_value: trend.latestValue, delta: trend.delta,
-        elapsed_seconds: trend.elapsedSeconds, samples: trend.samples }] : [];
-    });
     const alertContext = activeDiagnosticAlert ? {
       episode_id: activeDiagnosticAlert.id, metric: activeDiagnosticAlert.metric, severity: activeDiagnosticAlert.severity,
       observed_value: activeDiagnosticAlert.observed_value, expected_range: activeDiagnosticAlert.expected_range,
       explanation: activeDiagnosticAlert.explanation,
     } : null;
     const request: DiagnosticRequest = {
-      pump_id: telemetry.pump_id, simulation_id: liveClientSessionIdRef.current ?? undefined,
+      pump_id: telemetry.pump_id, client_session_id: liveClientSessionIdRef.current ?? undefined,
+      simulation_id: liveClientSessionIdRef.current ?? undefined,
       alert_episode_id: activeDiagnosticAlert?.id, assessment_timestamp: assessment.timestamp,
       telemetry: samples.map((reading) => ({ timestamp: reading.timestamp, temperature_c: reading.temperature_c,
         vibration_mm_s: reading.vibration_mm_s, sound_db: reading.sound_db, rpm: reading.rpm,
         pressure_kpa: reading.pressure_kpa, load_percent: reading.load_percent })),
-      trends, detector: { status: assessment.status, score: assessment.health_score,
+      // The backend derives deterministic trends from this exact telemetry window.
+      trends: [], detector: { status: assessment.status, score: assessment.health_score,
         predicted_faults: assessment.detected_faults, confidence: null }, is_synthetic: true,
       assessment: { status: assessment.status, health_score: assessment.health_score,
         anomalies: assessment.anomalies, recommendations: assessment.recommendations },
@@ -654,7 +651,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
             <DiagnosticExplorer assessment={assessment} telemetry={telemetry} readings={readings} scenario={returnedScenario ?? scenario} freshness={diagnosticFreshness} selectedMetric={selectedMetric} selectedAlert={selectedAlert} onSelectMetric={(metric) => { setSelectedMetric(metric); const matching = [...alerts].reverse().find((item) => item.metric === metric && item.state !== 'resolved'); setSelectedAlertId(matching?.id ?? null); }} diagnosis={visibleDiagnosis} diagnosisLoading={diagnosticLoading} diagnosisError={diagnosticError} providerStatus={providerStatus} diagnosticAvailable={Boolean(api.diagnose)} onRequestDiagnosis={() => void requestDiagnosis()} api={api} pumpId={telemetry?.pump_id ?? pumpId} clientSessionId={liveClientSessionIdRef.current ?? undefined} />
           </section>
           <TelemetryAnalysisPanel analysis={telemetryAnalysis} loading={telemetryAnalysisLoading} error={telemetryAnalysisError} onAnalyze={() => void requestTelemetryAnalysis()} available={Boolean(api.telemetryAnalysis) && Boolean(telemetry)} />
-          <AiFeaturePanel api={api} pumpId={telemetry?.pump_id ?? pumpId} clientSessionId={liveClientSessionIdRef.current} contextAvailable={Boolean(telemetry && assessment)} contextKey={`${telemetry?.pump_id ?? pumpId}:${returnedScenario ?? scenario}`} />
+          <AiFeaturePanel api={api} pumpId={telemetry?.pump_id ?? pumpId} clientSessionId={liveClientSessionIdRef.current} contextAvailable={Boolean(telemetry && assessment)} contextKey={`${telemetry?.pump_id ?? pumpId}:${returnedScenario ?? scenario}:${liveClientSessionIdRef.current ?? ''}`} />
         </section>
 
         <EventTimeline monitoring={monitoring} snapshot={simulationSnapshot} alerts={alerts} diagnosis={visibleDiagnosis} sessionEvents={sessionEvents} />

@@ -51,18 +51,18 @@ export function AiFeaturePanel({ api, pumpId, clientSessionId, contextAvailable,
   return <section className="ai-feature-panel" aria-label="AI engineering tools">
     <div className="ai-feature-heading">
       <div><span className="panel-kicker">OPTIONAL AI INTERPRETATION</span><h3>Engineering tools</h3></div>
-      <small>Rule engine remains authoritative</small>
+      <small>AMD Token Factory · on-demand explanations</small>
     </div>
-    <p className="ai-feature-note">AMD or the configured offline provider receives only server-owned synthetic telemetry, deterministic analysis, and simulator context. Output is a draft, not a confirmed diagnosis.</p>
+    <p className="ai-feature-note">AMD receives server-owned synthetic telemetry, calculated trends, and simulator context. Responses are AI-generated demo explanations, not confirmed diagnoses, and cannot change measurements or alerts.</p>
     <div className="ai-feature-actions">
       {FEATURES.map((feature) => <button type="button" key={feature.kind} onClick={() => void requestFeature(feature.kind)} disabled={!api.aiFeature || !pumpId || !contextAvailable || loading} aria-label={feature.label}>
         <b>{feature.label}</b><small>{feature.description}</small>
       </button>)}
     </div>
-    {loading && <p className="ai-feature-status" role="status">Generating a bounded, evidence-grounded draft…</p>}
+    {loading && <p className="ai-feature-status" role="status">Requesting an AI-generated demo explanation from AMD…</p>}
     {error && <div className="ai-feature-error" role="alert"><span>{error}</span><button type="button" onClick={() => void requestFeature()} disabled={loading}>Retry</button></div>}
     {result && <article className="ai-feature-result">
-      <div className="ai-feature-result-meta"><b>{FEATURES.find((feature) => feature.kind === result.feature)?.label}</b><span>{result.provider === 'amd' && !result.is_mock ? 'AMD-generated response' : result.is_mock ? 'TEST MOCK — not AMD-generated' : 'Provider unavailable — not an AMD diagnosis'} · {Math.round(result.latency_ms)} ms · evidence {new Date(result.evidence_timestamp).toLocaleTimeString()}</span></div>
+      <div className="ai-feature-result-meta"><b>{FEATURES.find((feature) => feature.kind === result.feature)?.label}</b><span>{result.provider === 'amd' && !result.is_mock ? 'AI-generated demo explanation · AMD' : result.is_mock ? 'TEST MOCK — not AMD-generated' : 'Provider unavailable — no AI-generated result'} · {Math.round(result.latency_ms)} ms · evidence {new Date(result.evidence_timestamp).toLocaleTimeString()}</span></div>
       <div className="chat-message-content">{renderAssistantContent(result.assistant_message)}</div>
     </article>}
   </section>;

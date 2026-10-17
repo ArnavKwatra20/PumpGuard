@@ -99,11 +99,11 @@ export function DiagnosticChat({ api, pumpId, clientSessionId, contextAvailable 
       <div><span className="panel-kicker">CONTEXTUAL FOLLOW-UP</span><h4>Diagnostic Assistant</h4></div>
       <button type="button" className="chat-clear-button" onClick={clear} disabled={!messages.length || sending}>Clear conversation</button>
     </div>
-    <p className="diagnostic-chat-note">Answers use the selected pump’s authoritative backend telemetry and rule assessment. They do not change measurements, alerts, or controls.</p>
+    <p className="diagnostic-chat-note">AI-generated demo explanations use the selected pump’s backend telemetry, calculated trends, and monitoring context. They are not confirmed diagnoses and do not change measurements, alerts, or controls.</p>
     <div className="diagnostic-chat-log" role="log" aria-live="polite" aria-label="Diagnostic conversation">
       {!messages.length && <p className="chat-empty">Ask a focused question about the current evidence.</p>}
       {messages.map((message, index) => <article className={`chat-message ${message.role}`} key={`${message.timestamp ?? 'message'}-${index}`}>
-        <div className="chat-message-meta"><b>{message.role === 'user' ? 'YOU' : 'ASSISTANT'}</b>{message.role === 'assistant' && <span>{message.provider === 'amd' && !message.is_mock ? 'AMD-generated response' : message.is_mock ? 'TEST MOCK — not AMD-generated' : 'Provider unavailable'}</span>}<time dateTime={message.timestamp}>{message.timestamp ? displayTime(message.timestamp) : ''}</time></div>
+        <div className="chat-message-meta"><b>{message.role === 'user' ? 'YOU' : 'ASSISTANT'}</b>{message.role === 'assistant' && <span>{message.provider === 'amd' && !message.is_mock ? 'AI-generated demo explanation · AMD' : message.is_mock ? 'TEST MOCK — not AMD-generated' : 'Provider unavailable'}</span>}<time dateTime={message.timestamp}>{message.timestamp ? displayTime(message.timestamp) : ''}</time></div>
         <div className="chat-message-content">{renderAssistantContent(message.content)}</div>
       </article>)}
       {sending && <div className="chat-loading" role="status"><span className="loading-dot" /> Consulting the configured diagnostic provider…</div>}

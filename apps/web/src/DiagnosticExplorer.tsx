@@ -45,13 +45,13 @@ export function DiagnosticExplorer({ assessment, telemetry, readings, scenario, 
   return <div className="diagnostic-explorer" aria-live="polite">
     <span className="panel-kicker">EVIDENCE &amp; FAULT RELATIONSHIPS</span>
     <section className="explorer-block ai-diagnosis" aria-label="AI diagnostic explanation">
-      <h4>Diagnostic explanation <small>separate from rule-based detection</small></h4>
+      <h4>Diagnostic explanation <small>AI-generated demo text; not a confirmed diagnosis</small></h4>
       <button type="button" className="diagnosis-request-button" onClick={onRequestDiagnosis} disabled={!assessment || !diagnosticAvailable || diagnosisLoading || Boolean(providerStatus && providerStatus.provider !== 'mock' && !providerStatus.configured)}>
         {diagnosisLoading ? 'Preparing diagnostic…' : diagnosisError ? 'Retry diagnostic request' : diagnosis ? 'Refresh diagnostic explanation' : 'Request diagnostic explanation'}
       </button>
       {diagnosisError && <p className="diagnosis-error" role="alert">{diagnosisError}</p>}
       {diagnosis && <div className="diagnosis-result" aria-label="Diagnostic result">
-        <span className="diagnosis-source">{diagnosis.is_mock ? 'MOCK RESULT · NOT AN AMD MODEL' : diagnosis.provider.toUpperCase()} · {diagnosis.latency_ms.toFixed(0)} ms · evidence snapshot {time(diagnosis.assessment_timestamp)}{diagnosis.cached ? ' · cached for this alert episode' : ''}</span>
+        <span className="diagnosis-source">{diagnosis.provider === 'amd' && !diagnosis.is_mock ? 'AI-GENERATED DEMO EXPLANATION · AMD' : diagnosis.is_mock ? 'TEST MOCK · NOT AN AMD MODEL' : 'PROVIDER UNAVAILABLE'} · {diagnosis.latency_ms.toFixed(0)} ms · backend evidence snapshot {time(diagnosis.assessment_timestamp)}{diagnosis.cached ? ' · cached offline result' : ''}</span>
         {diagnosis.ml_prediction && <p><b>ML scenario classifier:</b> {diagnosis.ml_prediction.label} · uncalibrated score {diagnosis.ml_prediction.score.toFixed(2)} · {diagnosis.ml_prediction.compute_provider} / {diagnosis.ml_prediction.device} · {diagnosis.ml_prediction.model_version}. This is not a fault probability or degradation forecast.</p>}
         <p>{diagnosis.summary}</p>
         <p><b>Priority: {diagnosis.priority}</b> · {diagnosis.priority_rationale}</p>
