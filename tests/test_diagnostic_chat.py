@@ -239,12 +239,12 @@ def test_chat_allows_qualitative_and_numbered_inspection_recommendations():
 
 
 def test_chat_accepts_exact_and_rounded_context_telemetry_values():
-    for content in (
-        "The measured vibration is 6.55 mm/s.",
-        "The measured vibration is 6.6 mm/s after rounding.",
-    ):
-        with TestClient(create_app(diagnostic_provider=RecordingChatProvider(content))) as client:
-            client.post("/api/v1/simulation/generate", json=seed_request())
+    for formatter in (lambda value: str(value), lambda value: f"{value:.1f}"):
+        provider = RecordingChatProvider()
+        with TestClient(create_app(diagnostic_provider=provider)) as client:
+            generated = client.post("/api/v1/simulation/generate", json=seed_request()).json()
+            measured = generated["readings"][-1]["vibration_mm_s"]
+            provider.response = f"The measured vibration is {formatter(measured)} mm/s."
             response = client.post("/api/v1/diagnostics/chat", json={
                 "pump_id": "chat-pump", "question": "Which telemetry signal supports this?",
             })
