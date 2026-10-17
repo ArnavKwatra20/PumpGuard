@@ -1,4 +1,5 @@
 """AMD-backed maintenance, telemetry, and scenario demo explanations."""
+from dataclasses import asdict, is_dataclass
 from fastapi import APIRouter, HTTPException, Request
 
 from pumpguard.detection.rules import DEFAULT_THRESHOLDS
@@ -63,12 +64,15 @@ async def ai_feature(payload: AiFeatureRequest, request: Request) -> AiFeatureRe
         "sample_count": len(readings),
         "current_rule_assessment": assessment.model_dump(mode="json"),
         "deterministic_telemetry_analysis": analysis.model_dump(mode="json"),
-        "recorded_simulation_snapshot": snapshot,
-        "configured_thresholds": [threshold.__dict__ for threshold in DEFAULT_THRESHOLDS],
+        "recorded_simulation_snapshot": snapshot if snapshot is not None else {},
+        "live_session_available": snapshot is not None,
+        "configured_thresholds": [asdict(threshold) if is_dataclass(threshold) else dict(threshold)
+                                  for threshold in DEFAULT_THRESHOLDS],
         "context_limits": [
             "All telemetry and simulator records are synthetic backend records.",
             "Configured thresholds are the server rule-engine definitions and may be cited exactly.",
             "No physical inspection, inventory, cost, maintenance history, or repair duration is available.",
+            "A missing live simulation snapshot means this session has no recorded live scenario; do not infer one from batch telemetry.",
             "Use all supplied context to explain the telemetry; do not alter measurements or monitoring state.",
         ],
     }

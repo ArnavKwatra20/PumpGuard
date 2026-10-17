@@ -156,6 +156,21 @@ def test_ai_feature_uses_live_session_snapshot_when_available():
     assert provider.contexts[0]["recorded_simulation_snapshot"]["scenario"] == "cavitation"
 
 
+def test_ai_feature_handles_absent_live_snapshot_after_batch_simulation():
+    provider = RecordingProvider()
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        generated = client.post("/api/v1/simulation/generate", json=seed_request())
+        assert generated.status_code == 200
+        response = client.post("/api/v1/diagnostics/ai-feature", json={
+            "pump_id": "feature-pump", "feature": "scenario_analyst",
+        })
+    assert response.status_code == 200, response.text
+    assert provider.contexts[0]["recorded_simulation_snapshot"] == {}
+    assert provider.contexts[0]["live_session_available"] is False
+    assert any("missing live simulation snapshot" in item
+               for item in provider.contexts[0]["context_limits"])
+
+
 def test_ai_feature_telemetry_is_scoped_to_the_selected_session():
     provider = RecordingProvider()
     with TestClient(create_app(diagnostic_provider=provider)) as client:
