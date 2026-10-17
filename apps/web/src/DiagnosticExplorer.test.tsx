@@ -19,7 +19,7 @@ describe('DiagnosticExplorer', () => {
       providerStatus={null}
       diagnosticAvailable={false}
       onRequestDiagnosis={() => undefined}
-      api={{}}
+      api={{ generate: async () => { throw new Error('not used'); }, history: async () => [] }}
       pumpId={null}
     />);
 
