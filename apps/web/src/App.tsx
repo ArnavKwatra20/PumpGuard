@@ -137,14 +137,28 @@ function SystemStatus({ telemetry, assessment, stale }: { telemetry: Telemetry |
   </section>;
 }
 
-function EventTimeline({ monitoring, snapshot, alerts, diagnosis, sessionEvents }: { monitoring: MonitoringState; snapshot: SimulationSnapshot | null; alerts: AlertEvent[]; diagnosis: DiagnosticResult | null; sessionEvents: { id: string; label: string; time: string; tone: string }[] }) {
-  const items: { id: string; label: string; time: string; tone: string }[] = [];
-  if (monitoring === 'live') items.push({ id: 'simulation-running', label: 'Simulation running', time: 'Live session', tone: 'good' });
-  for (const event of snapshot?.events ?? []) items.push({ id: `${event.kind}-${event.time_seconds}-${event.scenario}`, label: event.kind.replaceAll('_', ' '), time: `${event.time_seconds.toFixed(1)} s`, tone: event.kind.includes('fault') ? 'alert' : 'info' });
-  for (const alert of alerts) items.push({ id: alert.id, label: `${alert.state === 'resolved' ? 'Fault resolved' : 'Alert'} · ${alert.metric.replaceAll('_', ' ')}`, time: new Date(alert.timestamp).toLocaleTimeString(), tone: alert.severity === 'critical' ? 'alert' : 'warn' });
+type TimelineEvent = { id: string; label: string; time: string; tone: string; timestampMs: number };
+
+export function buildEventTimelineItems({ monitoring, snapshot, alerts, diagnosis, sessionEvents, latestTelemetryTimestamp, nowMs = Date.now() }: {
+  monitoring: MonitoringState; snapshot: SimulationSnapshot | null; alerts: AlertEvent[]; diagnosis: DiagnosticResult | null;
+  sessionEvents: TimelineEvent[]; latestTelemetryTimestamp?: string | null; nowMs?: number;
+}): TimelineEvent[] {
+  const items: TimelineEvent[] = [];
+  if (monitoring === 'live') items.push({ id: 'simulation-running', label: 'Simulation running', time: 'Live session', tone: 'good', timestampMs: nowMs });
+  const telemetryMs = latestTelemetryTimestamp ? Date.parse(latestTelemetryTimestamp) : Number.NaN;
+  const snapshotTimeMs = Number.isFinite(telemetryMs) && snapshot
+    ? telemetryMs - snapshot.time_seconds * 1000
+    : nowMs - (snapshot?.time_seconds ?? 0) * 1000;
+  for (const event of snapshot?.events ?? []) items.push({ id: `${event.kind}-${event.time_seconds}-${event.scenario}`, label: event.kind.replaceAll('_', ' '), time: `${event.time_seconds.toFixed(1)} s`, tone: event.kind.includes('fault') ? 'alert' : 'info', timestampMs: snapshotTimeMs + event.time_seconds * 1000 });
+  for (const alert of alerts) items.push({ id: alert.id, label: `${alert.state === 'resolved' ? 'Fault resolved' : 'Alert'} · ${alert.metric.replaceAll('_', ' ')}`, time: new Date(alert.timestamp).toLocaleTimeString(), tone: alert.severity === 'critical' ? 'alert' : 'warn', timestampMs: Date.parse(alert.timestamp) });
   items.push(...sessionEvents);
-  if (diagnosis) items.push({ id: `diagnosis-${diagnosis.correlation_id}`, label: `Diagnostic explanation · ${diagnosis.provider === 'amd' && !diagnosis.is_mock ? 'AMD demo' : diagnosis.is_mock ? 'test mock' : 'provider unavailable'}`, time: new Date(diagnosis.assessment_timestamp).toLocaleTimeString(), tone: 'info' });
-  const unique = [...new Map(items.map((item) => [item.id, item])).values()].slice(-8);
+  if (diagnosis) items.push({ id: `diagnosis-${diagnosis.correlation_id}`, label: `Diagnostic explanation · ${diagnosis.provider === 'amd' && !diagnosis.is_mock ? 'AMD demo' : diagnosis.is_mock ? 'test mock' : 'provider unavailable'}`, time: new Date(diagnosis.assessment_timestamp).toLocaleTimeString(), tone: 'info', timestampMs: Date.parse(diagnosis.assessment_timestamp) });
+  return [...new Map(items.map((item) => [item.id, item])).values()]
+    .sort((left, right) => left.timestampMs - right.timestampMs).slice(-8);
+}
+
+function EventTimeline({ monitoring, snapshot, alerts, diagnosis, sessionEvents, latestTelemetryTimestamp }: { monitoring: MonitoringState; snapshot: SimulationSnapshot | null; alerts: AlertEvent[]; diagnosis: DiagnosticResult | null; sessionEvents: TimelineEvent[]; latestTelemetryTimestamp?: string | null }) {
+  const unique = buildEventTimelineItems({ monitoring, snapshot, alerts, diagnosis, sessionEvents, latestTelemetryTimestamp });
   return <section className="event-timeline panel" aria-label="Session event timeline"><div className="timeline-heading"><div><span className="panel-kicker">SESSION HISTORY</span><h2>Event timeline</h2></div><span>IN-MEMORY SESSION</span></div>{unique.length ? <ol>{unique.map((item) => <li key={item.id} className={item.tone}><i/><time>{item.time}</time><b>{item.label}</b></li>)}</ol> : <p>No simulation events yet. Start a simulation to record session events.</p>}</section>;
 }
 
@@ -180,7 +194,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
   const [resetToken, setResetToken] = useState(0);
   const [apiOnline, setApiOnline] = useState<boolean | null>(null);
   const [alerts, setAlerts] = useState<AlertEvent[]>([]);
-  const [sessionEvents, setSessionEvents] = useState<{ id: string; label: string; time: string; tone: string }[]>([]);
+  const [sessionEvents, setSessionEvents] = useState<TimelineEvent[]>([]);
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -214,7 +228,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
   const recordSessionEvent = (label: string, tone = 'info') => {
     const timestamp = new Date();
     const id = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${timestamp.getTime()}-${Math.random()}`;
-    setSessionEvents((current) => [...current, { id, label, tone, time: timestamp.toLocaleTimeString() }].slice(-32));
+    setSessionEvents((current) => [...current, { id, label, tone, time: timestamp.toLocaleTimeString(), timestampMs: timestamp.getTime() }].slice(-32));
   };
 
   useEffect(() => {
@@ -654,7 +668,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
           <AiFeaturePanel api={api} pumpId={telemetry?.pump_id ?? pumpId} clientSessionId={liveClientSessionIdRef.current} contextAvailable={Boolean(telemetry && assessment)} contextKey={`${telemetry?.pump_id ?? pumpId}:${returnedScenario ?? scenario}:${liveClientSessionIdRef.current ?? ''}`} />
         </section>
 
-        <EventTimeline monitoring={monitoring} snapshot={simulationSnapshot} alerts={alerts} diagnosis={visibleDiagnosis} sessionEvents={sessionEvents} />
+        <EventTimeline monitoring={monitoring} snapshot={simulationSnapshot} alerts={alerts} diagnosis={visibleDiagnosis} sessionEvents={sessionEvents} latestTelemetryTimestamp={telemetry?.timestamp} />
 
         <section className="assessment-section panel" id="assessment-panel">
           <div className="assessment-main"><div className="section-title assessment-title"><div><span className="panel-kicker">RULE-BASED HEALTH ENGINE</span><h2>Latest assessment</h2></div><HealthBadge assessment={assessment} /></div>

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { PumpTwinApp } from './App';
+import { buildEventTimelineItems, PumpTwinApp } from './App';
 import type { DiagnosticRequest, DiagnosticResult, PumpApi, SimulationResponse } from './api';
 
 const audioMock = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), setErrorHandler: vi.fn(), activate: vi.fn(), close: vi.fn() }));
@@ -50,6 +50,15 @@ function selectScenario(scenario: SimulationResponse['scenario_label'] = 'bearin
 }
 
 describe('digital twin dashboard', () => {
+  it('sorts timeline entries by epoch time before keeping the most recent eight', () => {
+    const sessionEvents = Array.from({ length: 10 }, (_, index) => ({
+      id: `event-${index}`, label: `Event ${index}`, time: '', tone: 'info', timestampMs: index * 1000,
+    })).reverse();
+    const items = buildEventTimelineItems({ monitoring: 'stopped', snapshot: null, alerts: [], diagnosis: null,
+      sessionEvents, nowMs: 20_000 });
+    expect(items.map((item) => item.id)).toEqual(Array.from({ length: 8 }, (_, index) => `event-${index + 2}`));
+  });
+
   it('renders the monitoring overview with accessible in-page navigation and no invented live readings', () => {
     setup();
     expect(screen.getByRole('heading', { name: 'Pump monitoring' })).toBeInTheDocument();
