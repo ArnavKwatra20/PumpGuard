@@ -153,12 +153,11 @@ export interface PumpApi {
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? '';
 const REQUEST_TIMEOUT_MS = 8_000;
-// Diagnostic explanations call the AMD Token Factory and can legitimately take tens of seconds
-// (the backend budget is PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS, default 50s). This deadline must stay
-// above that backend budget so the UI surfaces the backend's authoritative, categorized result
+// Diagnostic explanations call the AMD Token Factory and can use the 250s backend budget.
+// Keep this browser deadline above that budget so the UI surfaces the backend's categorized result
 // (success / 502 invalid response / 504 timeout / 429 rate limit) instead of aborting early and
 // misreporting a generic client timeout while the backend is still working.
-const DIAGNOSTIC_TIMEOUT_MS = Number(import.meta.env.VITE_DIAGNOSTIC_TIMEOUT_MS ?? 60_000);
+const DIAGNOSTIC_TIMEOUT_MS = Number(import.meta.env.VITE_DIAGNOSTIC_TIMEOUT_MS ?? 260_000);
 
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
