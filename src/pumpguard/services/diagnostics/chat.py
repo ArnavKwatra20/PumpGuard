@@ -23,7 +23,12 @@ _GLUED_UNIT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _KNOWN_CORRUPTED_TOKENS = re.compile(r"\b(?:thresholdaine|bandsaine|secondstons)\b", re.IGNORECASE)
-_HTML_TAG_PATTERN = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")
+_THINKING_BLOCK_PATTERN = re.compile(
+    r"<\s*(think|thinking)\b[^>]*>.*?(?:</\s*\1\s*>|\Z)", re.IGNORECASE | re.DOTALL,
+)
+_DANGEROUS_MARKUP_PATTERN = re.compile(
+    r"<\s*/?\s*(?:script|iframe)\b|\bon[a-z][a-z0-9_-]*\s*=|javascript\s*:", re.IGNORECASE,
+)
 _NUMBER_PATTERN = re.compile(r"(?<![A-Za-z])[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?![A-Za-z])")
 _CLAUSE_BOUNDARY_PATTERN = re.compile(r"[,;!?]|\.(?=\s|$)")
 _TIMESTAMP_PATTERN = re.compile(
@@ -310,14 +315,17 @@ class UnsupportedNumericEvidence(ProviderInvalidResponse):
 def _normalize_chat_content(text: str) -> str:
     """Accept provider text and normalize harmless formatting issues."""
     normalized = text.replace("\r\n", "\n").replace(r"\*\*", "**").strip()
+    normalized = _THINKING_BLOCK_PATTERN.sub(" ", normalized)
+    normalized = re.sub(r"[ \t]{2,}", " ", normalized)
     normalized = "\n".join(line.rstrip() for line in normalized.split("\n"))
     if not normalized or len(normalized) > 6000:
         raise ProviderInvalidResponse("Diagnostic chat returned unusable assistant content")
     if any(ord(character) < 32 and character not in "\n\t" for character in normalized):
         raise ProviderInvalidResponse("Diagnostic chat returned malformed assistant content")
 
-    # Reject HTML tags as a security measure
-    if _HTML_TAG_PATTERN.search(normalized):
+    # The UI renders plain text, but reject markup that could become executable
+    # if a downstream consumer ever interprets it as HTML.
+    if _DANGEROUS_MARKUP_PATTERN.search(normalized):
         raise ProviderInvalidResponse("Diagnostic chat returned malformed or unsupported text")
 
     # Fix glued units (e.g., "5seconds" -> "5 seconds")
@@ -327,9 +335,12 @@ def _normalize_chat_content(text: str) -> str:
     if _KNOWN_CORRUPTED_TOKENS.search(normalized):
         raise ProviderInvalidResponse("Diagnostic chat returned malformed or unsupported text")
 
-    # Re-check bold markers
+    # Remove a stray final marker rather than throwing away an otherwise usable
+    # model answer. Well-paired markers continue to render as bold.
     if normalized.count("**") % 2:
-        raise ProviderInvalidResponse("Diagnostic chat returned malformed Markdown")
+        marker = normalized.rfind("**")
+        normalized = normalized[:marker] + normalized[marker + 2:]
+        normalized = re.sub(r"[ \t]{2,}", " ", normalized)
     return normalized.strip()
 
 

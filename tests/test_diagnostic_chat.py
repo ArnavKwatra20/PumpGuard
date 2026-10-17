@@ -159,6 +159,27 @@ def test_chat_normalizer_preserves_complete_unit_tokens(text):
     assert _normalize_chat_content(text) == expected
 
 
+def test_chat_normalizer_accepts_inequalities_and_strips_model_thinking():
+    assert _normalize_chat_content("if x<y and y>z") == "if x<y and y>z"
+    assert _normalize_chat_content("Before <think>hidden analysis</think> after") == "Before after"
+    assert _normalize_chat_content("<thinking>private thought</thinking>Answer") == "Answer"
+
+
+def test_chat_normalizer_repairs_unbalanced_bold_marker():
+    assert _normalize_chat_content("An unmatched ** marker") == "An unmatched marker"
+
+
+@pytest.mark.parametrize("text", [
+    "<script>alert(1)</script>",
+    "<iframe src='https://example.invalid'></iframe>",
+    "<div onclick=\"run()\">x</div>",
+    "javascript:alert(1)",
+])
+def test_chat_normalizer_rejects_dangerous_html_constructs(text):
+    with pytest.raises(ProviderInvalidResponse):
+        _normalize_chat_content(text)
+
+
 def test_chat_grounding_keeps_flow_and_context_counts_out_of_wrong_metric_families():
     context = {
         "sample_count": 24,
