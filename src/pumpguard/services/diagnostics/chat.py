@@ -17,7 +17,9 @@ from pumpguard.services.diagnostics.service import DiagnosticTimeout
 logger = logging.getLogger(__name__)
 
 _GLUED_UNIT_PATTERN = re.compile(
-    r"\b\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|milliseconds?|mm/s|kpa|rpm|°c|db)(?=[A-Za-z])",
+    # Atomic unit matching prevents a plural token from backtracking to its
+    # singular stem (for example, "seconds" -> "second s").
+    r"\b\d+(?:\.\d+)?\s*(?>milliseconds?|seconds?|minutes?|hours?|mm/s|kpa|rpm|°c|dba|db)(?=[A-Za-z])",
     re.IGNORECASE,
 )
 _KNOWN_CORRUPTED_TOKENS = re.compile(r"\b(?:thresholdaine|bandsaine|secondstons)\b", re.IGNORECASE)

@@ -144,6 +144,21 @@ def test_chat_normalizer_separates_glued_units_without_regex_failure():
     assert _normalize_chat_content("The trend lasted 10 secondsasian.") == "The trend lasted 10 seconds asian."
 
 
+@pytest.mark.parametrize("text", [
+    "The trend lasted 12 seconds.",
+    "The service interval is 5 minutes.",
+    "The run took 3 hours.",
+    "The sensor sampled every 20 milliseconds.",
+    "The acoustic reading was 80 dBA.",
+    "The shaft speed was 1780 rpm.",
+    "Vibration measured 4.2 mm/s.",
+    "The trend lasted 10 secondsasian.",
+])
+def test_chat_normalizer_preserves_complete_unit_tokens(text):
+    expected = text.replace("secondsasian", "seconds asian")
+    assert _normalize_chat_content(text) == expected
+
+
 def test_chat_grounding_keeps_flow_and_context_counts_out_of_wrong_metric_families():
     context = {
         "sample_count": 24,
