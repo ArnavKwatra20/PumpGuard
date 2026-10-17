@@ -49,6 +49,28 @@ def test_increasing_trend_has_positive_rate_and_units():
     assert vib.rate_unit == "per_second"
 
 
+def test_regression_slope_uses_local_time_origin_for_epoch_timestamps():
+    svc = TelemetryAnalysisService()
+    readings = _readings({"vibration_mm_s": [6.0, 6.5, 7.0, 7.5]})
+    vib = _metric(svc.analyze("p1", readings), "vibration_mm_s")
+    assert vib.rate_per_second == pytest.approx(0.5, abs=1e-8)
+
+
+def test_sample_counts_count_incomplete_rows_not_missing_metric_cells():
+    from types import SimpleNamespace
+
+    readings = [
+        SimpleNamespace(timestamp=_BASE + timedelta(seconds=index), temperature_c=68.0,
+                        vibration_mm_s=(None if index == 1 else 2.0), sound_db=68.0, rpm=1780.0)
+        for index in range(3)
+    ]
+    result = TelemetryAnalysisService().analyze("p1", readings)
+    assert result.sample_count == 3
+    assert result.valid_sample_count == 2
+    assert result.missing_sample_count == 1
+    assert _metric(result, "vibration_mm_s").missing_count == 1
+
+
 def test_decreasing_trend_has_negative_rate():
     svc = TelemetryAnalysisService()
     result = svc.analyze("p1", _readings({"rpm": [float(v) for v in range(1800, 1780, -1)]}))

@@ -45,12 +45,15 @@ def _linear_slope(xs: list[float], ys: list[float]) -> float | None:
     n = len(xs)
     if n < _MIN_SAMPLES_FOR_TREND:
         return None
-    mean_x = sum(xs) / n
+    # Epoch timestamps lose sub-second precision when squared around 1e9.
+    # Translate to a local origin before regression; slope is translation invariant.
+    local_xs = [x - xs[0] for x in xs]
+    mean_x = sum(local_xs) / n
     mean_y = sum(ys) / n
-    sxx = sum((x - mean_x) ** 2 for x in xs)
+    sxx = sum((x - mean_x) ** 2 for x in local_xs)
     if sxx <= 0.0:
         return None
-    sxy = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    sxy = sum((x - mean_x) * (y - mean_y) for x, y in zip(local_xs, ys))
     return sxy / sxx
 
 
@@ -156,7 +159,12 @@ class TelemetryAnalysisService:
                                       rate_per_second=m.rate_per_second, direction=m.direction,
                                       excursions_high=m.excursions_high, excursions_low=m.excursions_low,
                                       critical_breaches=m.critical_breaches) for m in metrics]
-        missing_total = sum(m.missing_count for m in metrics)
+        valid_sample_count = sum(
+            all(getattr(reading, metric, None) is not None
+                and math.isfinite(float(getattr(reading, metric))) for metric in _ANALYZED_METRICS)
+            for reading in ordered
+        )
+        missing_sample_count = len(ordered) - valid_sample_count
         limitations = [
             "Telemetry is synthetic simulator output; it does not represent a real machine.",
             "Rate-of-change is a least-squares slope over the window, not a physical failure rate.",
@@ -164,14 +172,14 @@ class TelemetryAnalysisService:
         ]
         if not regular:
             limitations.append("Sampling intervals are irregular; rolling statistics assume evenly spaced samples.")
-        if missing_total:
+        if missing_sample_count:
             limitations.append("Some readings were missing or non-finite and were excluded from statistics.")
         return TelemetryAnalysis(
             asset_id=asset_id, synthetic=True,
             window_start=ordered[0].timestamp if ordered else None,
             window_end=ordered[-1].timestamp if ordered else None,
-            sample_count=len(ordered), valid_sample_count=len(ordered),
-            missing_sample_count=missing_total, sampling_regular=regular,
+            sample_count=len(ordered), valid_sample_count=valid_sample_count,
+            missing_sample_count=missing_sample_count, sampling_regular=regular,
             median_interval_seconds=median_interval, metrics=metrics, limitations=limitations, ai_summary=ai_summary,
         )
 
