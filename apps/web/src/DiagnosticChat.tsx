@@ -15,8 +15,23 @@ const SUGGESTIONS = [
   'What should an engineer inspect first?',
   'How has the pump condition changed?',
 ];
+const MAX_HISTORY_ITEMS = 8;
+const MAX_HISTORY_ITEM_CHARS = 2000;
+const MAX_HISTORY_CHARS = 8000;
 
 const displayTime = (timestamp: string) => new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+function boundedHistory(messages: DiagnosticChatMessage[]): Pick<DiagnosticChatMessage, 'role' | 'content'>[] {
+  const selected: Pick<DiagnosticChatMessage, 'role' | 'content'>[] = [];
+  let remaining = MAX_HISTORY_CHARS;
+  for (const message of messages.slice(-MAX_HISTORY_ITEMS).reverse()) {
+    if (remaining <= 0) break;
+    const content = message.content.slice(-Math.min(MAX_HISTORY_ITEM_CHARS, remaining));
+    selected.push({ role: message.role, content });
+    remaining -= content.length;
+  }
+  return selected.reverse();
+}
 
 const normalizeAssistantText = (content: string) => content
   .replace(/\\\*\\\*/g, '**')
@@ -54,6 +69,9 @@ export function DiagnosticChat({ api, pumpId, clientSessionId, contextAvailable 
   // Provider status is informational. The chat endpoint is the authoritative
   // availability check and can return a clear provider failure itself.
   const chatAvailable = Boolean(api.diagnosticChat);
+  const conversationTrimmed = messages.length > MAX_HISTORY_ITEMS
+    || messages.some((message) => message.content.length > MAX_HISTORY_ITEM_CHARS)
+    || messages.reduce((total, message) => total + message.content.length, 0) > MAX_HISTORY_CHARS;
   useEffect(() => {
     setMessages([]);
     setQuestion('');
@@ -63,8 +81,8 @@ export function DiagnosticChat({ api, pumpId, clientSessionId, contextAvailable 
   const send = async (value = question.trim(), retry = false) => {
     if (!value || !pumpId || !api.diagnosticChat || sending || !chatAvailable || !contextAvailable) return;
     const userMessage: DiagnosticChatMessage = { role: 'user', content: value, timestamp: new Date().toISOString() };
-    const history = messages.map(({ role, content }) => ({ role, content }));
-    if (!retry) setMessages((current) => [...current, userMessage]);
+    const history = boundedHistory(messages);
+    setMessages((current) => [...current, userMessage]);
     setQuestion('');
     setFailure(null);
     setSending(true);
@@ -72,6 +90,7 @@ export function DiagnosticChat({ api, pumpId, clientSessionId, contextAvailable 
       const result = await api.diagnosticChat({ pump_id: pumpId, ...(clientSessionId ? { client_session_id: clientSessionId } : {}), question: value, history });
       setMessages((current) => [...current, { role: 'assistant', content: result.assistant_message, timestamp: new Date().toISOString(), provider: result.provider, is_mock: result.is_mock }]);
     } catch (error) {
+      setMessages((current) => current.filter((message) => message.timestamp !== userMessage.timestamp));
       setFailure({ question: value, message: error instanceof Error ? error.message : 'Diagnostic assistant request failed.' });
     } finally {
       setSending(false);
@@ -102,6 +121,7 @@ export function DiagnosticChat({ api, pumpId, clientSessionId, contextAvailable 
     <p className="diagnostic-chat-note">AI-generated demo explanations use the selected pump’s backend telemetry, calculated trends, and monitoring context. They are not confirmed diagnoses and do not change measurements, alerts, or controls.</p>
     <div className="diagnostic-chat-log" role="log" aria-live="polite" aria-label="Diagnostic conversation">
       {!messages.length && <p className="chat-empty">Ask a focused question about the current evidence.</p>}
+      {conversationTrimmed && <p className="chat-history-trimmed">Older conversation content is trimmed to fit the diagnostic history limit.</p>}
       {messages.map((message, index) => <article className={`chat-message ${message.role}`} key={`${message.timestamp ?? 'message'}-${index}`}>
         <div className="chat-message-meta"><b>{message.role === 'user' ? 'YOU' : 'ASSISTANT'}</b>{message.role === 'assistant' && <span>{message.provider === 'amd' && !message.is_mock ? 'AI-generated demo explanation · AMD' : message.is_mock ? 'TEST MOCK — not AMD-generated' : 'Provider unavailable'}</span>}<time dateTime={message.timestamp}>{message.timestamp ? displayTime(message.timestamp) : ''}</time></div>
         <div className="chat-message-content">{renderAssistantContent(message.content)}</div>

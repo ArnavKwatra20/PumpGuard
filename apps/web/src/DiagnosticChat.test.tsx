@@ -68,6 +68,25 @@ describe('DiagnosticChat', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('Retry succeeded.')).toBeInTheDocument();
     expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[1][0].history).toEqual([]);
+  });
+
+  it('bounds a long conversation to the backend history contract', async () => {
+    const request = vi.fn().mockImplementation(async () => ({
+      assistant_message: 'A'.repeat(2500), provider: 'mock', is_mock: true, latency_ms: 1,
+    }));
+    setup(request);
+    for (let turn = 0; turn < 12; turn += 1) {
+      fireEvent.change(screen.getByLabelText('Ask about this pump'), { target: { value: `Question ${turn}` } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(request).toHaveBeenCalledTimes(turn + 1));
+      await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    }
+    const lastRequest = request.mock.calls[11][0];
+    expect(lastRequest.history.length).toBeGreaterThan(0);
+    expect(lastRequest.history.length).toBeLessThanOrEqual(8);
+    expect(lastRequest.history.reduce((total, item) => total + item.content.length, 0)).toBeLessThanOrEqual(8000);
+    expect(screen.getByText(/older conversation content is trimmed/i)).toBeInTheDocument();
   });
 
   it('renders escaped bold Markdown safely without interpreting HTML', async () => {
