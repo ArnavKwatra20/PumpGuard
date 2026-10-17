@@ -64,5 +64,8 @@ describe('AiFeaturePanel', () => {
     view.rerender(<AiFeaturePanel api={api} pumpId="pump-01" clientSessionId="session-02" contextAvailable contextKey="pump-01:normal:session-02" />);
     await act(async () => { resolveRequest(response); });
     expect(screen.queryByText('Inspect first')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Draft maintenance plan' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Explain telemetry trends' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Analyze active scenario' })).toBeEnabled();
   });
 });

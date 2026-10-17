@@ -27,6 +27,7 @@ export function AiFeaturePanel({ api, pumpId, clientSessionId, contextAvailable,
     requestVersionRef.current += 1;
     setResult(null);
     setError(null);
+    setLoading(false);
   }, [contextKey]);
 
   const requestFeature = async (feature: AiFeatureKind = selected) => {
