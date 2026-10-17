@@ -171,5 +171,6 @@ class DiagnosticResult(DiagnosticContent):
     latency_ms: float = Field(ge=0, le=120_000)
     correlation_id: str = Field(min_length=1, max_length=64)
     cached: bool = False
+    shared_inflight: bool = False
     assessment_timestamp: datetime
     ml_prediction: MLPredictionEvidence | None = None

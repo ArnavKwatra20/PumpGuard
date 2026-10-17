@@ -51,7 +51,7 @@ export function DiagnosticExplorer({ assessment, telemetry, readings, scenario, 
       </button>
       {diagnosisError && <p className="diagnosis-error" role="alert">{diagnosisError}</p>}
       {diagnosis && <div className="diagnosis-result" aria-label="Diagnostic result">
-        <span className="diagnosis-source">{diagnosis.provider === 'amd' && !diagnosis.is_mock ? 'AI-GENERATED DEMO EXPLANATION · AMD' : diagnosis.is_mock ? 'TEST MOCK · NOT AN AMD MODEL' : 'PROVIDER UNAVAILABLE'} · {diagnosis.latency_ms.toFixed(0)} ms · backend evidence snapshot {time(diagnosis.assessment_timestamp)}{diagnosis.cached ? ' · cached offline result' : ''}</span>
+        <span className="diagnosis-source">{diagnosis.provider === 'amd' && !diagnosis.is_mock ? 'AI-GENERATED DEMO EXPLANATION · AMD' : diagnosis.is_mock ? 'TEST MOCK · NOT AN AMD MODEL' : 'PROVIDER UNAVAILABLE'} · {diagnosis.latency_ms.toFixed(0)} ms · backend evidence snapshot {time(diagnosis.assessment_timestamp)}{diagnosis.shared_inflight ? ' · shared in-flight response' : diagnosis.cached ? ' · cached offline result' : ''}</span>
         {diagnosis.ml_prediction && <p><b>ML scenario classifier:</b> {diagnosis.ml_prediction.label} · uncalibrated score {diagnosis.ml_prediction.score.toFixed(2)} · {diagnosis.ml_prediction.compute_provider} / {diagnosis.ml_prediction.device} · {diagnosis.ml_prediction.model_version}. This is not a fault probability or degradation forecast.</p>}
         <p>{diagnosis.summary}</p>
         <p><b>Priority: {diagnosis.priority}</b> · {diagnosis.priority_rationale}</p>

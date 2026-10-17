@@ -292,6 +292,37 @@ def test_duplicate_episode_requests_share_inflight_result_and_cache():
     assert first.correlation_id == second.correlation_id
     assert second.cached is True
     assert later.cached is True and provider.calls == 1
+    assert second.shared_inflight is True
+    assert later.shared_inflight is False
+
+
+def test_duplicate_amd_requests_are_labeled_shared_inflight_not_offline_cache():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowAMDProvider:
+        name = "amd"
+
+        async def diagnose(self, request):
+            started.set()
+            await release.wait()
+            return await MockDiagnosticProvider().diagnose(request)
+
+    service = DiagnosticService(SlowAMDProvider())
+    parsed = DiagnosticRequest.model_validate(request_body())
+
+    async def call_twice():
+        first_task = asyncio.create_task(service.diagnose(parsed))
+        await started.wait()
+        second_task = asyncio.create_task(service.diagnose(parsed))
+        await asyncio.sleep(0)
+        release.set()
+        return await asyncio.gather(first_task, second_task)
+
+    first, second = asyncio.run(call_twice())
+    assert first.provider == second.provider == "amd"
+    assert first.shared_inflight is False
+    assert second.shared_inflight is True and second.cached is True
 
 
 def test_invalid_mock_configuration_is_rejected():

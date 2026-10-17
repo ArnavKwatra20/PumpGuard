@@ -165,7 +165,7 @@ class DiagnosticService:
                 task = asyncio.create_task(self._infer_and_cache(key, request, correlation_id))
                 self._inflight[key] = task
         result = await asyncio.shield(task)
-        return result.model_copy(update={"cached": True}) if is_duplicate else result
+        return result.model_copy(update={"cached": True, "shared_inflight": True}) if is_duplicate else result
 
     async def _infer_and_cache(self, key: str, request: DiagnosticRequest, correlation_id: str) -> DiagnosticResult:
         started = time.perf_counter()

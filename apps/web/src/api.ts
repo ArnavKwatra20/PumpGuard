@@ -70,6 +70,7 @@ export interface DiagnosticResult {
   latency_ms: number;
   correlation_id: string;
   cached: boolean;
+  shared_inflight: boolean;
   assessment_timestamp: string;
   ml_prediction?: { label: Scenario; score: number; model_version: string; compute_provider: 'cpu' | 'amd_rocm' | 'cuda'; device: string; execution_path: string } | null;
 }
