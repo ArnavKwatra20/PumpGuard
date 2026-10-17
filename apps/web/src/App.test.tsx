@@ -564,7 +564,7 @@ describe('digital twin dashboard', () => {
       hypotheses: [{ cause: 'bearing wear', rank: 1, uncertainty: 'high', evidence: [{ source: 'telemetry', field: 'vibration_mm_s', reading_index: 0, value: 7.1 }], missing_evidence: ['Direct inspection'] }],
       missing_evidence: ['Independent sensor verification'], inspection_steps: ['Verify sensor readings.'], priority: 'soon',
       priority_rationale: 'Rule warning only.', limitations: ['Synthetic data.'], human_review_required: true,
-      provider: 'mock', is_mock: true, latency_ms: 2, correlation_id: 'test-id', cached: false, assessment_timestamp: new Date().toISOString(),
+      provider: 'mock', is_mock: true, latency_ms: 2, correlation_id: 'test-id', cached: false, shared_inflight: false, assessment_timestamp: new Date().toISOString(),
     };
     const diagnose = vi.fn().mockResolvedValue(diagnostic);
     setup({ generate: vi.fn().mockResolvedValue(atOffset(0)), history: vi.fn(), liveSample: vi.fn().mockRejectedValue(new Error('stop')), diagnose });
@@ -585,7 +585,7 @@ describe('digital twin dashboard', () => {
     const diagnostic: DiagnosticResult = {
       summary: 'AMD explanation based on this evidence.', hypotheses: [], missing_evidence: [], inspection_steps: ['Inspect safely.'],
       priority: 'soon', priority_rationale: 'Rule warning.', limitations: ['Synthetic data.'], human_review_required: true,
-      provider: 'amd', is_mock: false, latency_ms: 3, correlation_id: 'amd-success', cached: false,
+      provider: 'amd', is_mock: false, latency_ms: 3, correlation_id: 'amd-success', cached: false, shared_inflight: false,
       assessment_timestamp: new Date().toISOString(),
     };
     const diagnose = vi.fn().mockResolvedValue(diagnostic);
@@ -610,7 +610,7 @@ describe('digital twin dashboard', () => {
     const diagnostic: DiagnosticResult = {
       summary: 'Evidence-based summary.', hypotheses: [], missing_evidence: [], inspection_steps: ['Inspect safely.'],
       priority: 'soon', priority_rationale: 'Rule warning.', limitations: ['Synthetic data.'], human_review_required: true,
-      provider: 'mock', is_mock: true, latency_ms: 1, correlation_id: 'window-test', cached: false,
+      provider: 'mock', is_mock: true, latency_ms: 1, correlation_id: 'window-test', cached: false, shared_inflight: false,
       assessment_timestamp: fixtureTimestamp,
     };
     const diagnose = vi.fn().mockResolvedValue(diagnostic);
@@ -664,7 +664,7 @@ describe('digital twin dashboard', () => {
     expect(await screen.findByText(/DETERMINISTIC ANALYSIS · 40 samples · regular sampling/)).toBeInTheDocument();
     expect(screen.getByText('SYNTHETIC TELEMETRY')).toBeInTheDocument();
     expect(screen.getByText(/excursions 40 · critical 1/)).toBeInTheDocument();
-    expect(telemetryAnalysis).toHaveBeenCalledWith('pump-01', expect.any(Number));
+    expect(telemetryAnalysis).toHaveBeenCalledWith('pump-01', expect.any(Number), expect.any(String));
   });
 
   it('surfaces a telemetry-analysis failure without blocking the dashboard', async () => {
