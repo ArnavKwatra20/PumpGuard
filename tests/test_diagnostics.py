@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -863,6 +864,47 @@ def test_amd_model_must_be_in_catalog_before_completion():
         response = api.post("/api/v1/diagnostics", json=request_body())
     assert response.status_code == 422
     assert completion_calls == []
+    assert "unit-test-secret" not in response.text
+    client.close()
+
+
+@pytest.mark.parametrize("catalog_failure", ["server_error", "timeout", "connection"])
+def test_amd_transient_catalog_failure_does_not_block_completion(catalog_failure):
+    import httpx
+    from openai import OpenAI
+    from pumpguard.services.diagnostics.providers import AmdProvider
+
+    calls = []
+    structured = {
+        "summary": "Synthetic telemetry warrants a qualified inspection.",
+        "hypotheses": [{"cause": "Abnormal vibration", "rank": 1, "uncertainty": "high",
+                        "evidence": [{"source": "telemetry", "field": "temperature_c", "metric": "temperature_c",
+                                      "reading_index": 0, "value": 69.5}], "missing_evidence": []}],
+        "missing_evidence": [], "inspection_steps": ["Inspect the rotating assembly under site procedures."],
+        "priority": "soon", "priority_rationale": "The supplied alert warrants timely human review.",
+        "limitations": ["Synthetic telemetry does not confirm a physical defect."], "human_review_required": True,
+    }
+
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            calls.append("catalog")
+            if catalog_failure == "server_error":
+                return httpx.Response(503, json={"error": {"message": "temporary"}})
+            if catalog_failure == "timeout":
+                raise httpx.ReadTimeout("temporary", request=request)
+            raise httpx.ConnectError("temporary", request=request)
+        calls.append("completion")
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {
+            "role": "assistant", "content": json.dumps(structured)}}]})
+
+    client = OpenAI(base_url="https://amd.example/v1", api_key="unit-test-secret", max_retries=0,
+                    http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    provider = AmdProvider("https://amd.example/v1", "DeepSeek-V4-Flash", "unit-test-secret", client=client)
+    with TestClient(create_app(diagnostic_provider=provider)) as api:
+        response = api.post("/api/v1/diagnostics", json=request_body())
+    assert response.status_code == 200, response.text
+    assert response.json()["provider"] == "amd"
+    assert calls == ["catalog", "completion"]
     assert "unit-test-secret" not in response.text
     client.close()
 

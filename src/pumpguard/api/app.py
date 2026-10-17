@@ -38,11 +38,8 @@ def create_app(service: TelemetryService | None = None, *, diagnostic_provider: 
     provider=diagnostic_provider or AmdProvider(
         settings.radeon_base_url, settings.radeon_model, settings.radeon_api_key,
         connect_timeout_seconds=settings.diagnostic_connect_timeout_seconds,
-        response_timeout_seconds=max(
-            0.01,
-            settings.diagnostic_timeout_seconds
-            - min(5.0, settings.diagnostic_timeout_seconds * 0.2),
-        ),
+        response_timeout_seconds=settings.diagnostic_completion_timeout_seconds,
+        catalog_timeout_seconds=settings.diagnostic_catalog_timeout_seconds,
         max_output_tokens=settings.diagnostic_max_output_tokens,
     )
     app.state.diagnostic_service=DiagnosticService(provider,settings.diagnostic_timeout_seconds)

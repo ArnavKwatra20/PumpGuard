@@ -238,6 +238,8 @@ Set `PUMPGUARD_CORS_ORIGINS` to the exact frontend origin, comma-separated, for 
 
 The backend keeps lightweight process-local limits on simulation generation, telemetry analysis, and ML-status inspection for the temporary single-process demo. AMD diagnostic, chat, and AI-feature requests have no PumpGuard request-count cap or sequential response cache; AMD Token Factory account limits still apply. Concurrent identical structured diagnostic submissions share one in-flight request. Adjust `PUMPGUARD_RATE_LIMIT_WINDOW_SECONDS`, `PUMPGUARD_RATE_LIMIT_SIMULATION`, `PUMPGUARD_RATE_LIMIT_ANALYSIS`, and `PUMPGUARD_RATE_LIMIT_ML` in the backend environment. A limited route returns `429` with `Retry-After`. These limits are not shared across workers or instances, so use hosting-provider access restriction if the preview is public.
 
+AMD requests use separate `PUMPGUARD_DIAGNOSTIC_CATALOG_TIMEOUT_SECONDS` (default `5`), `PUMPGUARD_DIAGNOSTIC_COMPLETION_TIMEOUT_SECONDS` (default `240`), and outer `PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS` (default `250`) budgets; the outer value must exceed the catalog and completion budgets combined. The connect timeout defaults to `3` seconds. The API project's function duration must exceed the outer timeout. For the documented Hobby deployment with Fluid Compute enabled, set the API function maximum duration to `300` seconds in Vercel Settings → Functions. Without Fluid Compute, Hobby's function duration limit can be `60` seconds, which is too short for these defaults. Do not add a root `app.py` function glob to `vercel.json`.
+
 Smoke test the deployed API before opening the frontend:
 
 ```powershell

@@ -1,6 +1,8 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from pumpguard.api.app import create_app
+from pumpguard.config import get_settings
 from pumpguard.services.diagnostics.providers import MockDiagnosticProvider
 
 
@@ -37,3 +39,17 @@ def test_cors_allows_configured_origin_and_rejects_other_origin(monkeypatch):
     assert allowed.headers["access-control-allow-origin"] == "https://demo.example"
     assert denied.status_code == 400
     assert "access-control-allow-origin" not in denied.headers
+
+
+def test_diagnostic_timeout_budgets_are_configurable_and_ordered(monkeypatch):
+    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_CATALOG_TIMEOUT_SECONDS", "5")
+    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_COMPLETION_TIMEOUT_SECONDS", "240")
+    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS", "250")
+    settings = get_settings()
+    assert settings.diagnostic_catalog_timeout_seconds == 5
+    assert settings.diagnostic_completion_timeout_seconds == 240
+    assert settings.diagnostic_timeout_seconds == 250
+
+    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS", "245")
+    with pytest.raises(ValueError, match="must exceed catalog plus completion"):
+        get_settings()

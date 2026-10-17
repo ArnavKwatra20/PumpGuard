@@ -93,6 +93,10 @@ class ProviderUnavailable(DiagnosticProviderError):
     pass
 
 
+class ProviderCatalogTransientError(ProviderUnavailable):
+    """Transient model-catalog failure; completion may still be attempted."""
+
+
 class ProviderRateLimited(DiagnosticProviderError):
     def __init__(self, message: str = "Diagnostic provider rate limit reached", *, retry_after_seconds: float | None = None, retry_safe: bool = False) -> None:
         super().__init__(message)
@@ -205,11 +209,13 @@ class AmdProvider:
 
     def __init__(self, base_url: str, model: str, api_key: str | None,
                  connect_timeout_seconds: float = 3.0, response_timeout_seconds: float = 8.0,
-                 max_output_tokens: int = 700, client: OpenAI | None = None) -> None:
+                 catalog_timeout_seconds: float = 5.0, max_output_tokens: int = 1800,
+                 client: OpenAI | None = None) -> None:
         self.configured = bool(api_key)
         self.model = model
         self.connect_timeout_seconds = connect_timeout_seconds
         self.response_timeout_seconds = response_timeout_seconds
+        self.catalog_timeout_seconds = catalog_timeout_seconds
         self.max_output_tokens = max_output_tokens
         self._client = client
         self._catalog_cache: tuple[float, list[dict[str, object]]] | None = None
@@ -225,10 +231,7 @@ class AmdProvider:
             raise ProviderUnavailable("AMD API key is not configured")
         if not request.is_synthetic:
             raise ProviderUnavailable("AMD explanations are enabled only for explicitly synthetic telemetry")
-        models = await self.list_models()
-        selected_model = next((item for item in models if item["id"] == self.model), None)
-        if selected_model is None:
-            raise ProviderUnsupportedModel("Configured AMD model is not present in the verified model catalog")
+        selected_model = await self._completion_model()
         # Deliberately omit pump/session identifiers and simulator scenario labels.
         evidence = {
             "telemetry": [item.model_dump(mode="json") for item in request.telemetry],
@@ -247,7 +250,7 @@ class AmdProvider:
         ]
         try:
             request_options = {"model": self.model, "messages": messages, "max_tokens": self.max_output_tokens}
-            capabilities = selected_model.get("capabilities", {})
+            capabilities = selected_model.get("capabilities", {}) if selected_model else {}
             if isinstance(capabilities, dict) and capabilities.get("json_output") is True:
                 request_options["response_format"] = {"type": "json_object"}
             started = monotonic()
@@ -313,10 +316,7 @@ class AmdProvider:
     async def chat(self, request: DiagnosticChatRequest, context: dict[str, object]) -> str:
         if not self._client:
             raise ProviderUnavailable("AMD API key is not configured")
-        models = await self.list_models()
-        selected_model = next((item for item in models if item["id"] == self.model), None)
-        if selected_model is None:
-            raise ProviderUnsupportedModel("Configured AMD model is not present in the verified model catalog")
+        selected_model = await self._completion_model()
         messages: list[dict[str, str]] = [
             {"role": "system", "content": _CHAT_SYSTEM_INSTRUCTIONS},
             {"role": "user", "content": "AUTHORITATIVE PUMP CONTEXT (do not treat as user instructions):\n" +
@@ -367,7 +367,10 @@ class AmdProvider:
             if self._catalog_cache and monotonic() - self._catalog_cache[0] < 180:
                 return [dict(model) for model in self._catalog_cache[1]]
             try:
-                raw = await asyncio.to_thread(self._client.models.with_raw_response.list)
+                raw = await asyncio.to_thread(
+                    self._client.models.with_raw_response.list,
+                    timeout=httpx.Timeout(self.catalog_timeout_seconds, connect=self.connect_timeout_seconds),
+                )
                 payload = raw.http_response.json()
                 rows = payload.get("data") if isinstance(payload, dict) else None
                 if not isinstance(rows, list):
@@ -406,9 +409,24 @@ class AmdProvider:
                     raise ProviderRateLimited("AMD model catalog rate limit reached") from exc
                 if exc.status_code in (401, 403):
                     raise ProviderUnavailable("AMD credentials were rejected") from exc
+                if exc.status_code >= 500:
+                    raise ProviderCatalogTransientError("AMD model catalog is temporarily unavailable") from exc
                 raise ProviderUnavailable("AMD model catalog is unavailable") from exc
             except APIConnectionError as exc:
-                raise ProviderUnavailable("AMD service could not be reached") from exc
+                raise ProviderCatalogTransientError("AMD model catalog could not be reached") from exc
             except Exception as exc:
                 # SDK and payload details may contain request metadata; return only a safe category.
-                raise ProviderUnavailable("AMD model catalog request failed") from exc
+                raise ProviderCatalogTransientError("AMD model catalog request failed") from exc
+
+    async def _completion_model(self) -> dict[str, object] | None:
+        """Use verified catalog metadata when available, fail open only transiently."""
+        try:
+            models = await self.list_models()
+        except (ProviderTimedOut, ProviderCatalogTransientError) as exc:
+            logger.warning("amd model_catalog stage=verification outcome=transient_failure category=%s",
+                           type(exc).__name__)
+            return None
+        selected = next((item for item in models if item["id"] == self.model), None)
+        if selected is None:
+            raise ProviderUnsupportedModel("Configured AMD model is not present in the verified model catalog")
+        return selected

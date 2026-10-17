@@ -400,8 +400,8 @@ def _validate_numeric_grounding(text: str, context: dict[str, object]) -> None:
 
 class DiagnosticChatService:
     def __init__(self, provider: DiagnosticProvider, timeout_seconds: float = 8.0) -> None:
-        if not 0.05 <= timeout_seconds <= 120:
-            raise ValueError("diagnostic chat timeout must be between 0.05 and 120 seconds")
+        if not 0.05 <= timeout_seconds <= 295:
+            raise ValueError("diagnostic chat timeout must be between 0.05 and 295 seconds")
         self.provider = provider
         self.timeout_seconds = timeout_seconds
 

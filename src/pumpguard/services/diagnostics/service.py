@@ -131,8 +131,8 @@ class DiagnosticTimeout(Exception):
 class DiagnosticService:
     """Single service boundary; detector/alert state is never modified here."""
     def __init__(self, provider: DiagnosticProvider, timeout_seconds: float = 8.0, cache_limit: int = 128) -> None:
-        if not 0.05 <= timeout_seconds <= 120:
-            raise ValueError("diagnostic timeout must be between 0.05 and 120 seconds")
+        if not 0.05 <= timeout_seconds <= 295:
+            raise ValueError("diagnostic timeout must be between 0.05 and 295 seconds")
         if cache_limit < 1:
             raise ValueError("cache_limit must be positive")
         self.provider = provider

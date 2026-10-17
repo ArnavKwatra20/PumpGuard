@@ -15,8 +15,10 @@ class Settings:
     history_limit:int=1000
     log_level:str="INFO"
     diagnostic_provider:str="amd"
-    diagnostic_timeout_seconds:float=50.0
+    diagnostic_timeout_seconds:float=250.0
     diagnostic_connect_timeout_seconds:float=3.0
+    diagnostic_catalog_timeout_seconds:float=5.0
+    diagnostic_completion_timeout_seconds:float=240.0
     radeon_base_url:str="https://developer.amd.com.cn/radeon/api/v1"
     radeon_model:str="DeepSeek-V4-Flash"
     radeon_api_key:str|None=field(default=None,repr=False)
@@ -32,10 +34,16 @@ def get_settings() -> Settings:
     if n<1: raise ValueError("PUMPGUARD_HISTORY_LIMIT must be positive")
     provider=os.getenv("PUMPGUARD_DIAGNOSTIC_PROVIDER","amd").lower()
     if provider != "amd": raise ValueError("PUMPGUARD_DIAGNOSTIC_PROVIDER must be amd; mock providers are test-only")
-    timeout=float(os.getenv("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS","50"))
-    if not .05<=timeout<=120: raise ValueError("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS must be between 0.05 and 120")
+    timeout=float(os.getenv("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS","250"))
+    if not .05<=timeout<=295: raise ValueError("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS must be between 0.05 and 295")
     connect_timeout=float(os.getenv("PUMPGUARD_DIAGNOSTIC_CONNECT_TIMEOUT_SECONDS","3"))
     if not .05<=connect_timeout<=30: raise ValueError("PUMPGUARD_DIAGNOSTIC_CONNECT_TIMEOUT_SECONDS must be between 0.05 and 30")
+    catalog_timeout=float(os.getenv("PUMPGUARD_DIAGNOSTIC_CATALOG_TIMEOUT_SECONDS","5"))
+    if not .05<=catalog_timeout<=30: raise ValueError("PUMPGUARD_DIAGNOSTIC_CATALOG_TIMEOUT_SECONDS must be between 0.05 and 30")
+    completion_timeout=float(os.getenv("PUMPGUARD_DIAGNOSTIC_COMPLETION_TIMEOUT_SECONDS","240"))
+    if not .05<=completion_timeout<=280: raise ValueError("PUMPGUARD_DIAGNOSTIC_COMPLETION_TIMEOUT_SECONDS must be between 0.05 and 280")
+    if timeout <= catalog_timeout + completion_timeout:
+        raise ValueError("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS must exceed catalog plus completion timeouts")
     base_url=os.getenv("RADEON_BASE_URL","https://developer.amd.com.cn/radeon/api/v1").rstrip("/")
     if not base_url.startswith("https://"):
         raise ValueError("RADEON_BASE_URL must use HTTPS")
@@ -67,6 +75,8 @@ def get_settings() -> Settings:
     return Settings(history_limit=n, log_level=os.getenv("PUMPGUARD_LOG_LEVEL","INFO").upper(),
         diagnostic_provider=provider, diagnostic_timeout_seconds=timeout,
         diagnostic_connect_timeout_seconds=connect_timeout,
+        diagnostic_catalog_timeout_seconds=catalog_timeout,
+        diagnostic_completion_timeout_seconds=completion_timeout,
         radeon_base_url=base_url, radeon_model=model, radeon_api_key=key,
         diagnostic_max_output_tokens=max_tokens, cors_origins=origins,
         rate_limit_window_seconds=window,
