@@ -122,6 +122,12 @@ class DiagnosticProvider(Protocol):
     async def diagnose(self, request: DiagnosticRequest) -> object: ...
 
 
+class DiagnosticChatProvider(Protocol):
+    name: str
+
+    async def chat(self, request: DiagnosticChatRequest, context: dict[str, object]) -> str: ...
+
+
 class MockDiagnosticProvider:
     """Offline deterministic provider with explicit failure modes for tests."""
     name = "mock"

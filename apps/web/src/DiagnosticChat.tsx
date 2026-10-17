@@ -50,14 +50,41 @@ function inlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
 
 export function renderAssistantContent(content: string): ReactNode {
   const blocks = normalizeAssistantText(content).split(/\n{2,}/).filter(Boolean);
-  return blocks.map((block, blockIndex) => {
+  const rendered: ReactNode[] = [];
+  blocks.forEach((block, blockIndex) => {
     const lines = block.split('\n');
-    const bullets = lines.length > 0 && lines.every((line) => /^\s*-\s+/.test(line));
-    if (bullets) {
-      return <ul key={`block-${blockIndex}`}>{lines.map((line, lineIndex) => <li key={`line-${lineIndex}`}>{inlineMarkdown(line.replace(/^\s*-\s+/, ''), `block-${blockIndex}-line-${lineIndex}`)}</li>)}</ul>;
+    let index = 0;
+    while (index < lines.length) {
+      const line = lines[index];
+      const heading = line.match(/^\s{0,3}(#{1,3})\s+(.+)\s*$/);
+      if (heading) {
+        rendered.push(<h3 key={`block-${blockIndex}-heading-${index}`}>{inlineMarkdown(heading[2], `block-${blockIndex}-${index}`)}</h3>);
+        index += 1;
+        continue;
+      }
+      const listMatch = line.match(/^\s*(?:([-*])\s+|(\d+)[.)]\s+)(.+)$/);
+      if (listMatch) {
+        const ordered = Boolean(listMatch[2]);
+        const items: string[] = [];
+        while (index < lines.length) {
+          const item = lines[index].match(/^\s*(?:([-*])\s+|(\d+)[.)]\s+)(.+)$/);
+          if (!item || Boolean(item[2]) !== ordered) break;
+          items.push(item[3]);
+          index += 1;
+        }
+        const content = items.map((item, itemIndex) => <li key={`item-${itemIndex}`}>{inlineMarkdown(item, `block-${blockIndex}-item-${itemIndex}`)}</li>);
+        rendered.push(ordered ? <ol key={`block-${blockIndex}-list-${index}`}>{content}</ol> : <ul key={`block-${blockIndex}-list-${index}`}>{content}</ul>);
+        continue;
+      }
+      const paragraph: string[] = [];
+      while (index < lines.length && !/^\s{0,3}#{1,3}\s+/.test(lines[index]) && !/^\s*(?:[-*]\s+|\d+[.)]\s+)/.test(lines[index])) {
+        paragraph.push(lines[index]);
+        index += 1;
+      }
+      if (paragraph.length) rendered.push(<p key={`block-${blockIndex}-paragraph-${index}`}>{paragraph.map((text, lineIndex) => <span key={`line-${lineIndex}`}>{lineIndex > 0 && <br />}{inlineMarkdown(text, `block-${blockIndex}-${lineIndex}`)}</span>)}</p>);
     }
-    return <p key={`block-${blockIndex}`}>{lines.map((line, lineIndex) => <span key={`line-${lineIndex}`}>{lineIndex > 0 && <br />}{inlineMarkdown(line, `block-${blockIndex}-line-${lineIndex}`)}</span>)}</p>;
   });
+  return rendered;
 }
 
 export function DiagnosticChat({ api, pumpId, clientSessionId, contextAvailable }: Props) {
@@ -78,7 +105,7 @@ export function DiagnosticChat({ api, pumpId, clientSessionId, contextAvailable 
     setFailure(null);
   }, [pumpId, clientSessionId]);
 
-  const send = async (value = question.trim(), retry = false) => {
+  const send = async (value = question.trim()) => {
     if (!value || !pumpId || !api.diagnosticChat || sending || !chatAvailable || !contextAvailable) return;
     const userMessage: DiagnosticChatMessage = { role: 'user', content: value, timestamp: new Date().toISOString() };
     const history = boundedHistory(messages);
@@ -128,7 +155,7 @@ export function DiagnosticChat({ api, pumpId, clientSessionId, contextAvailable 
       </article>)}
       {sending && <div className="chat-loading" role="status"><span className="loading-dot" /> Consulting the configured diagnostic provider…</div>}
     </div>
-    {failure && <div className="chat-error" role="alert"><span>{failure.message}</span><button type="button" onClick={() => void send(failure.question, true)} disabled={sending}>Retry</button></div>}
+    {failure && <div className="chat-error" role="alert"><span>{failure.message}</span><button type="button" onClick={() => void send(failure.question)} disabled={sending}>Retry</button></div>}
     <div className="chat-suggestions" aria-label="Suggested questions">
       {SUGGESTIONS.map((suggestion) => <button type="button" key={suggestion} onClick={() => { setQuestion(suggestion); textareaRef.current?.focus(); }} disabled={sending || !chatAvailable || !contextAvailable}>{suggestion}</button>)}
     </div>

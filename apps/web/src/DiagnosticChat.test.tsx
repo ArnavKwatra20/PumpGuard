@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { DiagnosticChatRequest, DiagnosticChatResponse, PumpApi } from './api';
-import { DiagnosticChat } from './DiagnosticChat';
+import type { DiagnosticChatMessage, DiagnosticChatRequest, DiagnosticChatResponse, PumpApi } from './api';
+import { DiagnosticChat, renderAssistantContent } from './DiagnosticChat';
 
 const defaultChat = vi.fn((_request: DiagnosticChatRequest): Promise<DiagnosticChatResponse> => Promise.resolve({
   assistant_message: 'Inspect the measured vibration and follow the rule assessment.',
@@ -14,6 +14,16 @@ function setup(diagnosticChat: NonNullable<PumpApi['diagnosticChat']> = defaultC
 }
 
 describe('DiagnosticChat', () => {
+  it('renders intro text, bullet and numbered lists, and headings safely', () => {
+    const { container } = render(<div>{renderAssistantContent('Inspect the following items:\n- Check **vibration**\n* Review mounting\n1. Confirm alignment\n2) Check lubrication\n### Next steps\nUse site procedures.')}</div>);
+    expect(screen.getByText('Inspect the following items:')).toBeInTheDocument();
+    expect(container.querySelector('ul')).not.toBeNull();
+    expect(container.querySelectorAll('ul')).toHaveLength(1);
+    expect(container.querySelectorAll('ol')).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 3, name: 'Next steps' })).toBeInTheDocument();
+    expect(screen.getByText('vibration').tagName).toBe('STRONG');
+  });
+
   it('sends a question and renders the assistant response', async () => {
     const { api } = setup();
     fireEvent.change(screen.getByLabelText('Ask about this pump'), { target: { value: 'Why is it warning?' } });
@@ -85,7 +95,7 @@ describe('DiagnosticChat', () => {
     const lastRequest = request.mock.calls[11][0];
     expect(lastRequest.history.length).toBeGreaterThan(0);
     expect(lastRequest.history.length).toBeLessThanOrEqual(8);
-    expect(lastRequest.history.reduce((total, item) => total + item.content.length, 0)).toBeLessThanOrEqual(8000);
+    expect(lastRequest.history.reduce((total: number, item: DiagnosticChatMessage) => total + item.content.length, 0)).toBeLessThanOrEqual(8000);
     expect(screen.getByText(/older conversation content is trimmed/i)).toBeInTheDocument();
   });
 

@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import time
 
 from pumpguard.models.diagnostic_chat import DiagnosticChatRequest, DiagnosticChatResponse
 from pumpguard.services.diagnostics.providers import (
-    DiagnosticProvider, ProviderInvalidResponse, ProviderRateLimited, ProviderTimedOut,
+    DiagnosticChatProvider, ProviderInvalidResponse, ProviderRateLimited, ProviderTimedOut,
     ProviderUnavailable, ProviderUnsupportedModel,
 )
 from pumpguard.services.diagnostics.service import DiagnosticTimeout
@@ -299,17 +298,11 @@ def _grounding_excerpt(text: str, match: re.Match[str]) -> str:
 
 
 class UnsupportedNumericEvidence(ProviderInvalidResponse):
-    """Grounding failure with bounded, content-safe correction hints for one AMD retry."""
+    """Grounding failure with bounded metadata for a safe rejection."""
 
     def __init__(self, claims: list[tuple[str, str]]) -> None:
         self.claims = tuple(dict.fromkeys(claims))
-        labels = ", ".join(f"{token} ({family})" for token, family in self.claims[:8])
         super().__init__("Diagnostic chat returned unsupported numerical evidence")
-        self.feedback = (
-            f"Your previous draft included unsupported numerical claims: {labels}. "
-            "Remove those claims, or use only exact values for the matching metric family from the "
-            "authoritative context. Do not estimate or infer values. Return the complete corrected answer."
-        )
 
 
 def _normalize_chat_content(text: str) -> str:
@@ -399,7 +392,7 @@ def _validate_numeric_grounding(text: str, context: dict[str, object]) -> None:
 
 
 class DiagnosticChatService:
-    def __init__(self, provider: DiagnosticProvider, timeout_seconds: float = 8.0) -> None:
+    def __init__(self, provider: DiagnosticChatProvider, timeout_seconds: float = 8.0) -> None:
         if not 0.05 <= timeout_seconds <= 295:
             raise ValueError("diagnostic chat timeout must be between 0.05 and 295 seconds")
         self.provider = provider
@@ -408,7 +401,7 @@ class DiagnosticChatService:
     async def respond(self, request: DiagnosticChatRequest, context: dict[str, object]) -> DiagnosticChatResponse:
         started = time.perf_counter()
         try:
-            text = await asyncio.wait_for(self.provider.chat(request, context), timeout=self.timeout_seconds)  # type: ignore[attr-defined]
+            text = await asyncio.wait_for(self.provider.chat(request, context), timeout=self.timeout_seconds)
             if not isinstance(text, str) or not text.strip():
                 raise ProviderInvalidResponse("Diagnostic chat returned empty assistant content")
             text = _normalize_chat_content(text)

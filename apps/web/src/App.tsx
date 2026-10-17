@@ -41,6 +41,11 @@ type MonitoringState = 'stopped' | 'live' | 'paused';
 type AlarmSoundStatus = 'ready' | 'blocked' | 'muted' | 'audible' | 'unavailable';
 const LIVE_INTERVAL_MS = 1000;
 const LIVE_MAX_AGE_MS = 30_000;
+
+function createClientSessionId() {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID() : `session-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
 const CHART_HISTORY_LIMIT = 120;
 
 function valueText(value: number | undefined, digits = 1) {
@@ -201,6 +206,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
   const [soundStatus, setSoundStatus] = useState<AlarmSoundStatus>('ready');
   const [lastFreshAssessment, setLastFreshAssessment] = useState<string | null>(null);
   const [monitoring, setMonitoring] = useState<MonitoringState>('stopped');
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const inFlight = useRef(false);
   const latestReadingRef = useRef<Telemetry | null>(null);
   const alertsRef = useRef(alerts);
@@ -208,14 +214,9 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
   const soundStatusRef = useRef(soundStatus);
   const audioRef = useRef<AlarmAudio | null>(null);
   const sirenRequestedRef = useRef(false);
-  const liveClientSessionIdRef = useRef<string | null>(null);
+  const [liveClientSessionId, setLiveClientSessionId] = useState(createClientSessionId);
   const diagnosticRequestVersionRef = useRef(0);
   const resetSessionNextRef = useRef(false);
-  if (liveClientSessionIdRef.current === null) {
-    liveClientSessionIdRef.current = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `session-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
-  }
   alertsRef.current = alerts;
   soundEnabledRef.current = soundEnabled;
   soundStatusRef.current = soundStatus;
@@ -224,6 +225,11 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
     soundStatusRef.current = status;
     setSoundStatus(status);
   };
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const recordSessionEvent = (label: string, tone = 'info') => {
     const timestamp = new Date();
@@ -314,7 +320,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
   const selectedAlert = alerts.find((item) => item.id === selectedAlertId) ?? null;
   const activeDiagnosticAlert = (selectedAlert?.state !== 'resolved' ? selectedAlert : null)
     ?? [...alerts].reverse().find((item) => item.state !== 'resolved') ?? null;
-  const diagnosticKey = activeDiagnosticAlert?.id ?? (telemetry ? `${telemetry.pump_id}:${liveClientSessionIdRef.current}` : null);
+  const diagnosticKey = activeDiagnosticAlert?.id ?? (telemetry ? `${telemetry.pump_id}:${liveClientSessionId}` : null);
   const visibleDiagnosis = diagnosticResultKey === diagnosticKey ? diagnosticResult : null;
   const activeCount = alerts.filter((item) => item.state !== 'resolved').length;
   const unacknowledgedAlerts = alerts.filter((item) => item.state === 'active');
@@ -330,7 +336,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
     return [...byComponent].map(([componentId, severity]) => ({ componentId, severity }));
   }, [alerts, selectedAlert, assessment, selectedMetric]);
 
-  const sampleAgeMs = telemetry ? Date.now() - Date.parse(telemetry.timestamp) : Infinity;
+  const sampleAgeMs = telemetry ? nowMs - Date.parse(telemetry.timestamp) : Infinity;
   const isFresh = Boolean(telemetry && Math.abs(sampleAgeMs) <= LIVE_MAX_AGE_MS && apiOnline !== false);
   const monitoringLabel = isFresh && monitoring === 'live' ? 'LIVE' : apiOnline === false ? 'DISCONNECTED' : telemetry && sampleAgeMs > LIVE_MAX_AGE_MS ? 'STALE' : monitoring === 'live' ? 'CONNECTING' : 'READY';
   const diagnosticFreshness = !telemetry ? 'Awaiting sample' : !isFresh ? (apiOnline === false ? 'Unavailable' : 'Stale') : 'Fresh';
@@ -343,8 +349,8 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
   const submit = async (event?: FormEvent, nextScenario = scenario, force = false) => {
     event?.preventDefault();
     if (pending || (inFlight.current && !force)) return;
-    liveClientSessionIdRef.current = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID() : `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const requestSessionId = createClientSessionId();
+    setLiveClientSessionId(requestSessionId);
     diagnosticRequestVersionRef.current += 1;
     setDiagnosticLoading(false);
     setDiagnosticError(null);
@@ -355,7 +361,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
       const requestStartedAt = Date.now();
       const response = validateSimulationResponse(await api.generate({
         pump_id: pumpId.trim(),
-        client_session_id: liveClientSessionIdRef.current ?? undefined,
+        client_session_id: requestSessionId,
         scenario: nextScenario,
         sample_count: sampleCount,
         sampling_interval_seconds: intervalSeconds,
@@ -406,7 +412,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
       inFlight.current = true;
       try {
         const rawResponse = api.liveSample
-          ? await api.liveSample({ pump_id: pumpId.trim(), scenario, random_seed: seed, client_session_id: liveClientSessionIdRef.current!,
+          ? await api.liveSample({ pump_id: pumpId.trim(), scenario, random_seed: seed, client_session_id: liveClientSessionId,
             reset_session: resetSessionNextRef.current, speed, rpm_setpoint: rpmSetpoint, load_percent: loadPercent, cooling_effectiveness: cooling,
             inlet_restriction_percent: inletRestriction, fault_severity: faultSeverity, fault_enabled: faultEnabled })
           : await api.generate({ pump_id: pumpId.trim(), scenario, sample_count: 1, sampling_interval_seconds: 1, random_seed: seed });
@@ -444,7 +450,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [api, monitoring, pumpId, scenario, seed, speed, rpmSetpoint, loadPercent, cooling, inletRestriction, faultSeverity, faultEnabled]);
+  }, [api, monitoring, pumpId, scenario, seed, speed, rpmSetpoint, loadPercent, cooling, inletRestriction, faultSeverity, faultEnabled, liveClientSessionId]);
 
   const changeScenario = (nextScenario: Scenario) => {
     if (nextScenario === scenario) return;
@@ -488,8 +494,8 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
       explanation: activeDiagnosticAlert.explanation,
     } : null;
     const request: DiagnosticRequest = {
-      pump_id: telemetry.pump_id, client_session_id: liveClientSessionIdRef.current ?? undefined,
-      simulation_id: liveClientSessionIdRef.current ?? undefined,
+      pump_id: telemetry.pump_id, client_session_id: liveClientSessionId,
+      simulation_id: liveClientSessionId,
       alert_episode_id: activeDiagnosticAlert?.id, assessment_timestamp: assessment.timestamp,
       telemetry: samples.map((reading) => ({ timestamp: reading.timestamp, temperature_c: reading.temperature_c,
         vibration_mm_s: reading.vibration_mm_s, sound_db: reading.sound_db, rpm: reading.rpm,
@@ -529,7 +535,7 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
     try {
       // The backend requires limit >= 2; request a bounded window of the recent history.
       const limit = Math.min(Math.max(readings.length, 2), 200);
-      const result = await api.telemetryAnalysis(telemetry?.pump_id ?? pumpId, limit, liveClientSessionIdRef.current ?? undefined);
+      const result = await api.telemetryAnalysis(telemetry?.pump_id ?? pumpId, limit, liveClientSessionId);
       setTelemetryAnalysis(result);
       recordSessionEvent('Telemetry intelligence analysis refreshed', 'info');
     } catch (reason) {
@@ -662,10 +668,10 @@ export function PumpTwinApp({ api = pumpApi }: Props) {
             </button>)}
           </div>
           <section className="diagnostic-panel panel" id="diagnostic-inspector" data-layout-slot="inspector" aria-label="Diagnostic inspector">
-            <DiagnosticExplorer assessment={assessment} telemetry={telemetry} readings={readings} scenario={returnedScenario ?? scenario} freshness={diagnosticFreshness} selectedMetric={selectedMetric} selectedAlert={selectedAlert} onSelectMetric={(metric) => { setSelectedMetric(metric); const matching = [...alerts].reverse().find((item) => item.metric === metric && item.state !== 'resolved'); setSelectedAlertId(matching?.id ?? null); }} diagnosis={visibleDiagnosis} diagnosisLoading={diagnosticLoading} diagnosisError={diagnosticError} providerStatus={providerStatus} diagnosticAvailable={Boolean(api.diagnose)} onRequestDiagnosis={() => void requestDiagnosis()} api={api} pumpId={telemetry?.pump_id ?? pumpId} clientSessionId={liveClientSessionIdRef.current ?? undefined} />
+            <DiagnosticExplorer assessment={assessment} telemetry={telemetry} readings={readings} scenario={returnedScenario ?? scenario} freshness={diagnosticFreshness} selectedMetric={selectedMetric} selectedAlert={selectedAlert} onSelectMetric={(metric) => { setSelectedMetric(metric); const matching = [...alerts].reverse().find((item) => item.metric === metric && item.state !== 'resolved'); setSelectedAlertId(matching?.id ?? null); }} diagnosis={visibleDiagnosis} diagnosisLoading={diagnosticLoading} diagnosisError={diagnosticError} providerStatus={providerStatus} diagnosticAvailable={Boolean(api.diagnose)} onRequestDiagnosis={() => void requestDiagnosis()} api={api} pumpId={telemetry?.pump_id ?? pumpId} clientSessionId={liveClientSessionId} />
           </section>
           <TelemetryAnalysisPanel analysis={telemetryAnalysis} loading={telemetryAnalysisLoading} error={telemetryAnalysisError} onAnalyze={() => void requestTelemetryAnalysis()} available={Boolean(api.telemetryAnalysis) && Boolean(telemetry)} />
-          <AiFeaturePanel api={api} pumpId={telemetry?.pump_id ?? pumpId} clientSessionId={liveClientSessionIdRef.current} contextAvailable={Boolean(telemetry && assessment)} contextKey={`${telemetry?.pump_id ?? pumpId}:${returnedScenario ?? scenario}:${liveClientSessionIdRef.current ?? ''}`} />
+          <AiFeaturePanel api={api} pumpId={telemetry?.pump_id ?? pumpId} clientSessionId={liveClientSessionId} contextAvailable={Boolean(telemetry && assessment)} contextKey={`${telemetry?.pump_id ?? pumpId}:${returnedScenario ?? scenario}:${liveClientSessionId}`} />
         </section>
 
         <EventTimeline monitoring={monitoring} snapshot={simulationSnapshot} alerts={alerts} diagnosis={visibleDiagnosis} sessionEvents={sessionEvents} latestTelemetryTimestamp={telemetry?.timestamp} />

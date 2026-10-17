@@ -50,6 +50,25 @@ function selectScenario(scenario: SimulationResponse['scenario_label'] = 'bearin
 }
 
 describe('digital twin dashboard', () => {
+  it('updates sample freshness as time passes without new telemetry', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(fixtureTimestamp));
+      const initial = atOffset(0);
+      const liveSample = vi.fn().mockResolvedValue(atOffset(1000));
+      setup({ generate: vi.fn().mockResolvedValue(initial), history: vi.fn(), liveSample });
+      selectScenario('bearing_wear');
+      fireEvent.click(screen.getByRole('button', { name: /generate simulation/i }));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(liveSample).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole('button', { name: /pause simulation/i }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(32_000); });
+      expect(document.querySelector('.freshness-note')).toHaveTextContent(/^STALE/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('sorts timeline entries by epoch time before keeping the most recent eight', () => {
     const sessionEvents = Array.from({ length: 10 }, (_, index) => ({
       id: `event-${index}`, label: `Event ${index}`, time: '', tone: 'info', timestampMs: index * 1000,

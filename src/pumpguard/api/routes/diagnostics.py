@@ -7,10 +7,11 @@ from pumpguard.models.diagnostic import (
     DiagnosticRequest, DiagnosticResult, DiagnosticTelemetry, DetectorEvidence,
     HealthAssessmentEvidence, MLPredictionEvidence,
 )
-from pumpguard.services.diagnostics.providers import ProviderInvalidResponse, ProviderRateLimited, ProviderTimedOut, ProviderUnsupportedModel, ProviderUnavailable
+from pumpguard.services.diagnostics.providers import DiagnosticProviderError, ProviderRateLimited, ProviderTimedOut, ProviderUnavailable
 from pumpguard.services.diagnostics.service import DiagnosticTimeout
 from pumpguard.services.health_service import assess_reading
 from pumpguard.services.telemetry_service import UnknownPumpError
+from pumpguard.api.provider_errors import provider_http_error
 
 router = APIRouter(tags=["diagnostics"])
 MAX_DIAGNOSTIC_REQUEST_BYTES = 32 * 1024
@@ -105,15 +106,5 @@ async def diagnose(request: Request) -> DiagnosticResult:
         if ml_prediction:
             payload = payload.model_copy(update={"ml_prediction": MLPredictionEvidence.model_validate(ml_prediction)})
         return await request.app.state.diagnostic_service.diagnose(payload)
-    except DiagnosticTimeout as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
-    except ProviderRateLimited as exc:
-        raise HTTPException(status_code=429, detail=str(exc), headers={"Retry-After": "1"}) from exc
-    except ProviderTimedOut as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
-    except ProviderInvalidResponse as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except ProviderUnsupportedModel as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except ProviderUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (DiagnosticProviderError, DiagnosticTimeout) as exc:
+        raise provider_http_error(exc, request.app.state.diagnostic_service.provider.name) from exc

@@ -5,21 +5,14 @@ from fastapi import APIRouter, HTTPException, Request
 from pumpguard.detection.rules import DEFAULT_THRESHOLDS
 from pumpguard.models.ai_feature import AiFeatureRequest, AiFeatureResponse
 from pumpguard.models.diagnostic_chat import DiagnosticChatRequest
-from pumpguard.services.diagnostics.providers import (
-    ProviderInvalidResponse, ProviderRateLimited, ProviderTimedOut, ProviderUnavailable,
-    ProviderUnsupportedModel,
-)
+from pumpguard.api.provider_errors import provider_http_error
+from pumpguard.services.diagnostics.providers import DiagnosticProviderError
 from pumpguard.services.diagnostics.service import DiagnosticTimeout
 from pumpguard.services.health_service import assess_reading
 from pumpguard.services.telemetry_service import UnknownPumpError
 
 router = APIRouter(tags=["ai-features"])
 
-
-def _provider_failure_detail(exc: Exception, provider_name: str) -> str:
-    source = "AMD" if provider_name in {"amd", "amd_unavailable"} else "test mock" if provider_name == "mock" else "configured provider"
-    return (f"{exc}. No response from {source} was produced; "
-            "the existing monitoring data remains unchanged.")
 
 _QUESTIONS = {
     "maintenance_planner": (
@@ -80,18 +73,8 @@ async def ai_feature(payload: AiFeatureRequest, request: Request) -> AiFeatureRe
     provider_name = request.app.state.diagnostic_chat_service.provider.name
     try:
         result = await request.app.state.diagnostic_chat_service.respond(chat_request, context)
-    except DiagnosticTimeout as exc:
-        raise HTTPException(status_code=504, detail=_provider_failure_detail(exc, provider_name)) from exc
-    except ProviderRateLimited as exc:
-        raise HTTPException(status_code=429, detail=_provider_failure_detail(exc, provider_name), headers={"Retry-After": "1"}) from exc
-    except ProviderTimedOut as exc:
-        raise HTTPException(status_code=504, detail=_provider_failure_detail(exc, provider_name)) from exc
-    except ProviderInvalidResponse as exc:
-        raise HTTPException(status_code=502, detail=_provider_failure_detail(exc, provider_name)) from exc
-    except ProviderUnsupportedModel as exc:
-        raise HTTPException(status_code=422, detail=_provider_failure_detail(exc, provider_name)) from exc
-    except ProviderUnavailable as exc:
-        raise HTTPException(status_code=503, detail=_provider_failure_detail(exc, provider_name)) from exc
+    except (DiagnosticProviderError, DiagnosticTimeout) as exc:
+        raise provider_http_error(exc, provider_name, include_context=True) from exc
     return AiFeatureResponse(feature=payload.feature, assistant_message=result.assistant_message,
                              provider=result.provider, is_mock=result.is_mock, latency_ms=result.latency_ms,
                              evidence_timestamp=latest_payload["timestamp"])
