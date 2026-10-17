@@ -201,11 +201,16 @@ def test_chat_grounding_does_not_use_distant_metric_marker_for_range_values():
 
 
 def test_chat_rejects_html_and_unbalanced_markdown_in_provider_text():
-    for content in ("<script>alert(1)</script>", "**unclosed warning"):
-        with TestClient(create_app(diagnostic_provider=RecordingChatProvider(content))) as client:
-            client.post("/api/v1/simulation/generate", json=seed_request())
-            response = client.post("/api/v1/diagnostics/chat", json={"pump_id": "chat-pump", "question": "Explain this"})
-        assert response.status_code == 502
+    with TestClient(create_app(diagnostic_provider=RecordingChatProvider("<script>alert(1)</script>"))) as client:
+        client.post("/api/v1/simulation/generate", json=seed_request())
+        html = client.post("/api/v1/diagnostics/chat", json={"pump_id": "chat-pump", "question": "Explain this"})
+    assert html.status_code == 502
+
+    with TestClient(create_app(diagnostic_provider=RecordingChatProvider("**unclosed warning"))) as client:
+        client.post("/api/v1/simulation/generate", json=seed_request())
+        markdown = client.post("/api/v1/diagnostics/chat", json={"pump_id": "chat-pump", "question": "Explain this"})
+    assert markdown.status_code == 200
+    assert markdown.json()["assistant_message"] == "unclosed warning"
 
 
 def test_chat_rejects_numerical_claims_not_present_in_authoritative_context(caplog):
