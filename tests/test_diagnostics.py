@@ -679,7 +679,7 @@ def test_amd_adapter_uses_verified_catalog_and_sends_only_bounded_evidence():
     sent_evidence = json.loads(sent[0]["messages"][1]["content"])
     assert sent_evidence["events"] == [{"time_seconds": 1.0, "kind": "fault_injected"}]
     assert "scenario" not in sent_evidence["events"][0]
-    assert sent[0]["max_tokens"] == 700
+    assert sent[0]["max_tokens"] == 1800
     assert sent[0]["response_format"] == {"type": "json_object"}
     contract = sent[0]["messages"][0]["content"]
     assert '"priority": exactly one of the JSON strings "routine", "soon", or "urgent"' in contract
@@ -772,7 +772,7 @@ def test_amd_invalid_response_content_is_rejected_explicitly(content, detail):
     client.close()
 
 
-def test_amd_openai_envelope_rejects_partial_content_and_ignores_reasoning_content():
+def test_amd_openai_envelope_rejects_partial_content_and_ignores_reasoning():
     """A successful AMD HTTP envelope is not a valid PumpGuard diagnosis by itself."""
     import httpx
     import json
@@ -783,12 +783,12 @@ def test_amd_openai_envelope_rejects_partial_content_and_ignores_reasoning_conte
         if request.url.path.endswith("/models"):
             return httpx.Response(200, json={"data": [{"id": "DeepSeek-V4-Flash", "json_output": True}]})
         # This mirrors the observed OpenAI-compatible envelope: content is the
-        # generated answer, while reasoning_content is a separate field.
+        # generated answer, while reasoning is a separate provider field.
         return httpx.Response(200, json={"id": "chatcmpl-test", "object": "chat.completion", "created": 1,
             "model": "DeepSeek-V4-Flash", "choices": [{"index": 0, "finish_reason": "stop",
                 "matched_stop": None, "logprobs": None,
                 "message": {"role": "assistant", "content": json.dumps({"summary": "partial"}),
-                             "reasoning_content": "A complete-looking rationale must not be used as the answer."}}],
+                             "reasoning": "A complete-looking rationale must not be used as the answer."}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}})
 
     client = OpenAI(base_url="https://amd.example/v1", api_key="unit-test-secret",

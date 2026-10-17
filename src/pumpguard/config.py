@@ -22,7 +22,7 @@ class Settings:
     radeon_base_url:str="https://developer.amd.com.cn/radeon/api/v1"
     radeon_model:str="DeepSeek-V4-Flash"
     radeon_api_key:str|None=field(default=None,repr=False)
-    diagnostic_max_output_tokens:int=700
+    diagnostic_max_output_tokens:int=1800
     cors_origins:tuple[str,...]=("http://localhost:5173","http://127.0.0.1:5173")
     rate_limit_window_seconds:int=60
     rate_limit_simulation:int=120
@@ -50,7 +50,7 @@ def get_settings() -> Settings:
     model=os.getenv("RADEON_MODEL","DeepSeek-V4-Flash").strip()
     if not model or len(model)>128:
         raise ValueError("RADEON_MODEL must contain 1 to 128 characters")
-    max_tokens=int(os.getenv("PUMPGUARD_DIAGNOSTIC_MAX_OUTPUT_TOKENS","700"))
+    max_tokens=int(os.getenv("PUMPGUARD_DIAGNOSTIC_MAX_OUTPUT_TOKENS","1800"))
     if not 64<=max_tokens<=4096:
         raise ValueError("PUMPGUARD_DIAGNOSTIC_MAX_OUTPUT_TOKENS must be between 64 and 4096")
     key=os.getenv("RADEON_API_KEY")

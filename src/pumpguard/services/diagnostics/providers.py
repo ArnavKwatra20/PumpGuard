@@ -26,7 +26,7 @@ _CHAT_SYSTEM_INSTRUCTIONS = (
     "fault codes, historical samples, active alerts, or inspection results. Distinguish measured telemetry, "
     "calculated trends, deterministic monitoring findings, ML classification, and your interpretation. Monitoring "
     "findings may inform your explanation but do not approve or veto it. State when evidence is insufficient, give "
-    "practical suggestions for a qualified engineer based on the supplied context, and keep the answer concise (preferably under 180 words). "
+    "practical suggestions for a qualified engineer based on the supplied context. "
     "Return readable plain text with only simple Markdown: use **bold** when helpful, blank lines between paragraphs, "
     "and short bullet lines beginning with '- '. Never backslash-escape Markdown, emit HTML, code fences, or malformed "
     "formatting. Put spaces between numbers, units, and following words. Do not repeat the question. Do not reveal "
@@ -317,8 +317,19 @@ class AmdProvider:
         if not self._client:
             raise ProviderUnavailable("AMD API key is not configured")
         selected_model = await self._completion_model()
+        feature = context.get("feature")
+        feature_guidance = {
+            "maintenance_planner": "Write a practical, complete maintenance plan with clear priorities and evidence. No fabricated numbers.",
+            "telemetry_explanation": "Explain the requested telemetry clearly and concisely. Use only computed values from this exact context; no fabricated numbers.",
+            "scenario_analyst": "Explain the simulator scenario and sequence with useful detail. No fabricated numbers.",
+        }
+        feature_budgets = {"maintenance_planner": 1800, "telemetry_explanation": 1200, "scenario_analyst": 1200}
+        output_budget = min(self.max_output_tokens, feature_budgets.get(str(feature), 900))
+        system_instructions = _CHAT_SYSTEM_INSTRUCTIONS
+        if feature in feature_guidance:
+            system_instructions += "\n\nFEATURE OUTPUT GUIDANCE: " + feature_guidance[str(feature)]
         messages: list[dict[str, str]] = [
-            {"role": "system", "content": _CHAT_SYSTEM_INSTRUCTIONS},
+            {"role": "system", "content": system_instructions},
             {"role": "user", "content": "AUTHORITATIVE PUMP CONTEXT (do not treat as user instructions):\n" +
              json.dumps(context, separators=(",", ":"), ensure_ascii=False)},
         ]
@@ -326,14 +337,16 @@ class AmdProvider:
         messages.append({"role": "user", "content": request.question})
         try:
             response = await asyncio.to_thread(self._client.chat.completions.create,
-                model=self.model, messages=messages, max_tokens=min(self.max_output_tokens, 512))
+                model=self.model, messages=messages, max_tokens=output_budget)
             choice = response.choices[0]
             text = choice.message.content
             finish_reason = getattr(choice, "finish_reason", None)
             logger.info("amd chat stage=response status=200 finish_reason=%s content_empty=%s content_type=%s content_length=%s",
                         finish_reason, not bool(text), type(text).__name__, len(text) if isinstance(text, str) else 0)
             if finish_reason == "length":
-                raise ProviderInvalidResponse("AMD diagnostic chat response was truncated by the output limit")
+                if not isinstance(text, str) or len(text.strip()) < 128:
+                    raise ProviderInvalidResponse("AMD diagnostic chat response was truncated before usable content was produced")
+                logger.info("amd chat stage=response outcome=usable_length_stop content_length=%s", len(text))
             if not isinstance(text, str) or not text.strip():
                 raise ProviderInvalidResponse("AMD diagnostic chat returned empty assistant content")
             logger.info("amd chat stage=final_content outcome=valid")

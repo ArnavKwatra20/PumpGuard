@@ -486,7 +486,7 @@ def test_amd_chat_uses_final_content_not_reasoning_and_validates_envelope():
             return httpx.Response(200, json={"data": [{"id": "DeepSeek-V4-Flash"}]})
         return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {
             "role": "assistant", "content": "Use the measured vibration value for the next inspection.",
-            "reasoning_content": "This hidden reasoning must not be shown."}}]})
+            "reasoning": "This hidden reasoning must not be shown."}}]})
 
     provider = AmdProvider("https://amd.example/v1", "DeepSeek-V4-Flash", "unit-test-secret", client=amd_client(handler))
     with TestClient(create_app(diagnostic_provider=provider)) as client:
@@ -551,4 +551,25 @@ def test_amd_chat_rejects_empty_malformed_truncated_and_upstream_502_responses()
             client.post("/api/v1/simulation/generate", json=seed_request())
             response = client.post("/api/v1/diagnostics/chat", json={"pump_id": "chat-pump", "question": "Explain this"})
         assert response.status_code == expected, response.text
+
+
+def test_amd_chat_uses_feature_token_budget_and_accepts_substantial_length_stopped_answer():
+    sent = []
+    content = "The telemetry explanation reports computed trends from the supplied backend evidence. " + ("It remains a synthetic observation. " * 8)
+
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "DeepSeek-V4-Flash"}]})
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"finish_reason": "length", "message": {
+            "content": content, "reasoning": "not for the user"}}]})
+
+    provider = AmdProvider("https://amd.example/v1", "DeepSeek-V4-Flash", "unit-test-secret", client=amd_client(handler))
+    with TestClient(create_app(diagnostic_provider=provider)) as client:
+        client.post("/api/v1/simulation/generate", json=seed_request())
+        response = client.post("/api/v1/diagnostics/chat", json={
+            "pump_id": "chat-pump", "question": "Explain trends", "history": [],
+        })
+    assert response.status_code == 200, response.text
+    assert sent[0]["max_tokens"] == 900
 
