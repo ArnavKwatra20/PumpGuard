@@ -224,7 +224,9 @@ def test_trend_elapsed_rejects_a_difference_beyond_browser_timestamp_precision()
 
 
 def test_timeout_is_bounded_and_returns_gateway_timeout(monkeypatch):
-    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS", "0.05")
+    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_TIMEOUT_SECONDS", "0.2")
+    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_CATALOG_TIMEOUT_SECONDS", "0.05")
+    monkeypatch.setenv("PUMPGUARD_DIAGNOSTIC_COMPLETION_TIMEOUT_SECONDS", "0.05")
     class SlowAMDProvider:
         name = "amd"
 
