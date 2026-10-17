@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import httpx
@@ -6,6 +7,7 @@ from fastapi.testclient import TestClient
 from openai import OpenAI
 
 from pumpguard.api.app import create_app
+from pumpguard.models.diagnostic_chat import DiagnosticChatRequest
 from pumpguard.services.diagnostics.providers import AmdProvider, MockDiagnosticProvider, ProviderInvalidResponse, ProviderTimedOut, _CHAT_SYSTEM_INSTRUCTIONS
 from pumpguard.services.diagnostics.chat import _normalize_chat_content, _validate_numeric_grounding
 
@@ -577,4 +579,25 @@ def test_amd_chat_uses_feature_token_budget_and_accepts_substantial_length_stopp
         })
     assert response.status_code == 200, response.text
     assert sent[0]["max_tokens"] == 900
+
+
+@pytest.mark.parametrize(("feature", "budget"), [
+    ("maintenance_planner", 1800),
+    ("telemetry_explanation", 1200),
+    ("scenario_analyst", 1200),
+    (None, 900),
+])
+def test_amd_chat_uses_defined_per_feature_output_budgets(feature, budget):
+    sent = []
+
+    def handler(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "DeepSeek-V4-Flash"}]})
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": "Verified explanation."}}]})
+
+    provider = AmdProvider("https://amd.example/v1", "DeepSeek-V4-Flash", "unit-test-secret", client=amd_client(handler))
+    request = DiagnosticChatRequest(pump_id="pump-01", question="Explain the telemetry.")
+    asyncio.run(provider.chat(request, {"feature": feature} if feature else {}))
+    assert sent[0]["max_tokens"] == budget
 
